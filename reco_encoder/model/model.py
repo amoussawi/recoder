@@ -55,6 +55,11 @@ class AutoEncoder(nn.Module):
       [nn.Parameter(torch.rand(reversed_enc_layers[i + 1], reversed_enc_layers[i])) for i in range(len(reversed_enc_layers) - 1)])
       for ind, w in enumerate(self.decode_w):
         weight_init.xavier_uniform(w)
+    else:
+      self.decode_w = list(reversed(self.encode_w))
+      for ind, w in enumerate(self.decode_w):
+        self.decode_w[ind] = w.transpose(0,1)
+
     self.decode_b = nn.ParameterList(
       [nn.Parameter(torch.zeros(reversed_enc_layers[i + 1])) for i in range(len(reversed_enc_layers) - 1)])
 
@@ -88,20 +93,12 @@ class AutoEncoder(nn.Module):
     return x
 
   def decode(self, z):
-    if self.is_constrained:
-      for ind, w in enumerate(list(reversed(self.encode_w))): # constrained autoencode re-uses weights from encoder
-        z = activation(input=F.linear(input=z, weight=w.transpose(0, 1), bias=self.decode_b[ind]),
-                     # last layer or decoder should not apply non linearities
-                     kind=self._nl_type if ind!=self._last else 'none')
-        #if self._dp_drop_prob > 0 and ind!=self._last: # and no dp on last layer
-        #  z = self.drop(z)
-    else:
-      for ind, w in enumerate(self.decode_w):
-        z = activation(input=F.linear(input=z, weight=w, bias=self.decode_b[ind]),
-                     # last layer or decoder should not apply non linearities
-                     kind=self._nl_type if ind!=self._last else 'none')
-        #if self._dp_drop_prob > 0 and ind!=self._last: # and no dp on last layer
-        #  z = self.drop(z)
+    for ind, w in enumerate(self.decode_w):
+      z = activation(input=F.linear(input=z, weight=w, bias=self.decode_b[ind]),
+                  # last layer or decoder should not apply non linearities
+                  kind=self._nl_type if ind!=self._last else 'none')
+      #if self._dp_drop_prob > 0 and ind!=self._last: # and no dp on last layer
+      #  z = self.drop(z)
     return z
 
   def forward(self, x):
