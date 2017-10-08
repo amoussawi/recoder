@@ -32,13 +32,14 @@ def MSEloss(inputs, targets, size_avarage=False):
   return criterion(inputs * mask.float(), targets), Variable(torch.Tensor([1.0])) if size_avarage else num_ratings
 
 class AutoEncoder(nn.Module):
-  def __init__(self, layer_sizes, nl_type='selu', is_constrained=True, dp_drop_prob=0.0):
+  def __init__(self, layer_sizes, nl_type='selu', is_constrained=True, dp_drop_prob=0.0, last_layer_act='none'):
     super(AutoEncoder, self).__init__()
     self._dp_drop_prob = dp_drop_prob
     if dp_drop_prob > 0:
       self.drop = nn.Dropout(dp_drop_prob)
     self._last = len(layer_sizes) - 2
     self._nl_type = nl_type
+    self._last_layer_act = last_layer_act
     self.encode_w = nn.ParameterList(
       [nn.Parameter(torch.rand(layer_sizes[i + 1], layer_sizes[i])) for i in range(len(layer_sizes) - 1)])
     for ind, w in enumerate(self.encode_w):
@@ -96,7 +97,7 @@ class AutoEncoder(nn.Module):
     for ind, w in enumerate(self.decode_w):
       z = activation(input=F.linear(input=z, weight=w, bias=self.decode_b[ind]),
                   # last layer or decoder should not apply non linearities
-                  kind=self._nl_type if ind!=self._last else 'none')
+                  kind=self._nl_type if ind!=self._last else self._last_layer_act)
       #if self._dp_drop_prob > 0 and ind!=self._last: # and no dp on last layer
       #  z = self.drop(z)
     return z
