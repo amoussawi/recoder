@@ -5,6 +5,8 @@ import torch.nn.functional as F
 import torch.nn.init as weight_init
 from torch.autograd import Variable
 
+import torch.sparse as sparse
+import numpy as np
 
 def activation(input, kind):
   if kind == 'selu':
@@ -35,10 +37,11 @@ def MSEloss(inputs, targets, size_avarage=False):
 
 
 def encode(x, encode_w, encode_b, activation_type, dp_drop_prob=None, training=False):
-  if dp_drop_prob is None:
-    dp_drop_prob = [0.0] * len(encode_w)
+  _dp_drop_prob = dp_drop_prob
+  if _dp_drop_prob is None:
+    _dp_drop_prob = [0.0] * len(encode_w)
 
-  if len(dp_drop_prob) != len(encode_w):
+  if len(_dp_drop_prob) != len(encode_w):
     raise ValueError('dropout values list and list of weights should have equal length')
 
   if len(activation_type) != len(encode_w):
@@ -46,8 +49,8 @@ def encode(x, encode_w, encode_b, activation_type, dp_drop_prob=None, training=F
 
   for ind, w in enumerate(encode_w):
     x = activation(input=F.linear(input=x, weight=w,bias=encode_b[ind]),kind=activation_type[ind])
-    if dp_drop_prob[ind] > 0:
-      x = F.dropout(x, p=dp_drop_prob[ind], training=training, inplace=False)
+    if _dp_drop_prob[ind] > 0:
+      x = F.dropout(x, p=_dp_drop_prob[ind], training=training, inplace=False)
   return x
 
 def decode(z, decode_w, decode_b, activation_type, dp_drop_prob=None, training=False):
@@ -55,15 +58,15 @@ def decode(z, decode_w, decode_b, activation_type, dp_drop_prob=None, training=F
 
 
 class AutoEncoder(nn.Module):
-  def __init__(self, layer_sizes, activation_type='selu', last_layer_act='none', is_constrained=True, dp_drop_prob=0.0, training=False):
+  def __init__(self, layer_sizes, activation_type='selu', last_layer_act='none',
+               is_constrained=True, dp_drop_prob=0.0, training=False):
     super(AutoEncoder, self).__init__()
-    self._last = len(layer_sizes) - 2
 
     self._activation_type = activation_type
     if type(self._activation_type) is str:
       self._activation_type = [self._activation_type] * (len(layer_sizes) - 1)
 
-    self._e_activation_type = list(self._activation_type)
+    self._e_activation_type = self._activation_type
     self._d_activation_type = list(self._activation_type)
     self._d_activation_type[len(self._d_activation_type) - 1] = last_layer_act
 
@@ -132,3 +135,82 @@ class AutoEncoder(nn.Module):
   def forward(self, x):
     return self.decode(self.encode(x))
 
+
+class SparseBatchAutoEncoder(nn.Module):
+
+  def __init__(self, auto_encoder, sparse_batch):
+    super(SparseBatchAutoEncoder, self).__init__()
+
+    self.auto_encoder = auto_encoder
+
+    self._activation_type = auto_encoder._activation_type
+    self._e_activation_type = auto_encoder._e_activation_type
+    self._d_activation_type = auto_encoder._d_activation_type
+
+    self._dp_drop_prob = auto_encoder._dp_drop_prob
+
+    self._training = auto_encoder._training
+
+    self._sparse_batch = sparse_batch
+
+    self.__generate_reduced_batch()
+    self.__init_w()
+
+  def __generate_reduced_batch(self):
+    sparse_batch = self._sparse_batch
+    if type(sparse_batch) is Variable:
+      sparse_batch = sparse_batch.data
+
+    if type(sparse_batch) is not sparse.FloatTensor:
+      raise ValueError('expected a torch.sparse.FloatTensor')
+
+    active_inputs = sparse_batch._indices()[1]
+    active_inputs = torch.from_numpy(np.unique(active_inputs.numpy()))
+    active_inputs_map = {}
+    for ind, inp in enumerate(active_inputs):
+      active_inputs_map[inp] = ind
+
+    reduced_batch_size = torch.Size([sparse_batch.size(0),active_inputs.size(0)])
+    reduced_batch = torch.zeros(reduced_batch_size)
+
+    _indices = sparse_batch._indices()
+    for i in range(_indices.size(1)):
+      reduced_batch[_indices[0][i]][active_inputs_map[_indices[1][i]]] = sparse_batch._values()[i]
+
+    self.reduced_batch = Variable(reduced_batch)
+    self.active_inputs = Variable(active_inputs)
+    self.active_inputs_map = active_inputs_map
+
+  def __init_w(self):
+    active_inputs = self.active_inputs
+    _encode_w = self.auto_encoder.encode_w
+    _encode_b = self.auto_encoder.encode_b
+
+    _decode_w = self.auto_encoder.decode_w
+    _decode_b = self.auto_encoder.decode_b
+
+    _last = len(_decode_w) - 1
+
+    self.encode_w = [_encode_w[0].index_select(1, active_inputs)] \
+                    + [_encode_w[i] for i in range(1,len(_encode_w))]
+
+    self.encode_b = _encode_b
+
+    self.decode_w = [_decode_w[i] for i in range(len(_decode_w) - 1)] \
+                    + [_decode_w[_last].index_select(0, active_inputs) ]
+
+    self.decode_b = [_decode_b[i] for i in range(len(_decode_b) - 1)] \
+                    + [_decode_b[_last].index_select(0, active_inputs)]
+
+  def encode(self, x):
+    return encode(x, self.encode_w, self.encode_b,
+                  self._e_activation_type, dp_drop_prob=self._dp_drop_prob,
+                  training=self._training)
+
+  def decode(self, z):
+    return decode(z, self.decode_w, self.decode_b,
+                  self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
+                  training=self._training)
+
+  def forward(self):
+    return self.decode(self.encode(self.reduced_batch))

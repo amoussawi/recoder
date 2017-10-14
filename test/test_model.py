@@ -4,7 +4,7 @@ import sys
 import torch.optim as optim
 from torch.autograd import Variable
 from reco_encoder.data.input_layer import UserItemRecDataProvider
-from reco_encoder.model.model import AutoEncoder, MSEloss
+from reco_encoder.model.model import AutoEncoder, MSEloss, SparseBatchAutoEncoder
 sys.path.append('data')
 sys.path.append('model')
 
@@ -82,7 +82,7 @@ class uRecAutoEncoderTest(unittest.TestCase):
         loss.backward()
         optimizer.step()
         print('[%d, %5d] loss: %.7f' % (epoch, i, loss.data[0]))
-        if i == 5: # too much compute for CPU
+        if i == 100: # too much compute for CPU
           break
 
   def test_GPU(self):
@@ -112,7 +112,32 @@ class uRecAutoEncoderTest(unittest.TestCase):
         denom += 1
       print("Total epoch {} loss: {}".format(epoch, total_epoch_loss / denom))
 
+class SparseBatchAutoEncoderTest(unittest.TestCase):
+  def test_CPU(self):
+    print("SparseBatchAutoEncoderTest Test on  CPU started")
+    params = {}
+    params['batch_size'] = 256
+    params['data_dir'] = 'test/testData_uRec'
+    data_layer = UserItemRecDataProvider(params=params)
+    print("Vector dim: {}".format(data_layer.vector_dim))
+    print("Total items found: {}".format(len(data_layer.data.keys())))
+    self.assertTrue(len(data_layer.data.keys())>0)
+    encoder = AutoEncoder(layer_sizes=[data_layer.vector_dim, 128, data_layer.vector_dim],training=True)
+    optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
+    for epoch in range(1):
+      for i, mb in enumerate(data_layer.iterate_one_epoch()):
+        sparse_ae = SparseBatchAutoEncoder(encoder,mb)
+        inputs = sparse_ae.reduced_batch
+        optimizer.zero_grad()
+        outputs = sparse_ae()
+        loss, num_ratings = MSEloss(outputs, inputs)
+        loss = loss / num_ratings
+        loss.backward()
+        optimizer.step()
+        print('[%d, %5d] loss: %.7f' % (epoch, i, loss.data[0]))
+        if i == 100: # too much compute for CPU
+          break
+
 
 if __name__ == '__main__':
   unittest.main()
-
