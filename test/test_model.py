@@ -70,7 +70,7 @@ class uRecAutoEncoderTest(unittest.TestCase):
     print("Vector dim: {}".format(data_layer.vector_dim))
     print("Total items found: {}".format(len(data_layer.data.keys())))
     self.assertTrue(len(data_layer.data.keys())>0)
-    encoder = AutoEncoder(layer_sizes=[data_layer.vector_dim, 128, data_layer.vector_dim])
+    encoder = AutoEncoder(layer_sizes=[data_layer.vector_dim, 128, data_layer.vector_dim],training=True)
     optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
     for epoch in range(1):
       for i, mb in enumerate(data_layer.iterate_one_epoch()):
