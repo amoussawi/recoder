@@ -59,7 +59,7 @@ def decode(z, decode_w, decode_b, activation_type, dp_drop_prob=None, training=F
 
 class AutoEncoder(nn.Module):
   def __init__(self, layer_sizes, activation_type='selu', last_layer_act='none',
-               is_constrained=True, dp_drop_prob=0.0, training=False):
+               is_constrained=True, dp_drop_prob=0.0):
     super(AutoEncoder, self).__init__()
 
     self._activation_type = activation_type
@@ -75,7 +75,6 @@ class AutoEncoder(nn.Module):
       self._dp_drop_prob = [self._dp_drop_prob] * (len(layer_sizes) - 1)
 
     self._last_layer_act = last_layer_act
-    self._training = training
     self.encode_w = nn.ParameterList(
       [nn.Parameter(torch.rand(layer_sizes[i + 1], layer_sizes[i])) for i in range(len(layer_sizes) - 1)])
     for ind, w in enumerate(self.encode_w):
@@ -125,12 +124,12 @@ class AutoEncoder(nn.Module):
   def encode(self, x):
     return encode(x, self.encode_w, self.encode_b,
                   self._e_activation_type, dp_drop_prob=self._dp_drop_prob,
-                  training=self._training)
+                  training=self.training)
 
   def decode(self, z):
     return decode(z, self.decode_w, self.decode_b,
                   self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
-                  training=self._training)
+                  training=self.training)
 
   def forward(self, x):
     return self.decode(self.encode(x))
@@ -138,7 +137,7 @@ class AutoEncoder(nn.Module):
 
 class SparseBatchAutoEncoder(nn.Module):
 
-  def __init__(self, auto_encoder, sparse_batch):
+  def __init__(self, auto_encoder, sparse_batch_in, sparse_batch_out=None):
     super(SparseBatchAutoEncoder, self).__init__()
 
     self.auto_encoder = auto_encoder
@@ -149,68 +148,81 @@ class SparseBatchAutoEncoder(nn.Module):
 
     self._dp_drop_prob = auto_encoder._dp_drop_prob
 
-    self._training = auto_encoder._training
+    self.training = auto_encoder.training
 
-    self._sparse_batch = sparse_batch
+    self._sparse_batch_in = sparse_batch_in
+    self.reduced_batch_in, self.active_inputs, self.active_inputs_map \
+                              = self.__generate_reduced_batch(self._sparse_batch_in)
 
-    self.__generate_reduced_batch()
-    self.__init_w()
+    if sparse_batch_out is None:
+      self._sparse_batch_out = self._sparse_batch_in
+      self.active_outputs = self.active_inputs
+      self.active_outputs_map = self.active_inputs_map
+    else:
+      self.reduced_batch_out, self.active_outputs, self.active_outputs_map \
+                    = self.__generate_reduced_batch(self._sparse_batch_out)
 
-  def __generate_reduced_batch(self):
-    sparse_batch = self._sparse_batch
+    self.__init_encode_w()
+    self.__init_decode_w()
+
+
+  def __generate_reduced_batch(self, sparse_batch):
     if type(sparse_batch) is Variable:
       sparse_batch = sparse_batch.data
 
     if type(sparse_batch) is not sparse.FloatTensor:
       raise ValueError('expected a torch.sparse.FloatTensor')
 
-    active_inputs = sparse_batch._indices()[1]
-    active_inputs = torch.from_numpy(np.unique(active_inputs.numpy()))
-    active_inputs_map = {}
-    for ind, inp in enumerate(active_inputs):
-      active_inputs_map[inp] = ind
+    active_dim = sparse_batch._indices()[1]
+    active_dim = torch.from_numpy(np.unique(active_dim.numpy()))
+    active_dim_map = {}
+    for ind, inp in enumerate(active_dim):
+      active_dim_map[inp] = ind
 
-    reduced_batch_size = torch.Size([sparse_batch.size(0),active_inputs.size(0)])
+    reduced_batch_size = torch.Size([sparse_batch.size(0),active_dim.size(0)])
     reduced_batch = torch.zeros(reduced_batch_size)
 
     _indices = sparse_batch._indices()
     for i in range(_indices.size(1)):
-      reduced_batch[_indices[0][i]][active_inputs_map[_indices[1][i]]] = sparse_batch._values()[i]
+      reduced_batch[_indices[0][i]][active_dim_map[_indices[1][i]]] = sparse_batch._values()[i]
 
-    self.reduced_batch = Variable(reduced_batch)
-    self.active_inputs = Variable(active_inputs)
-    self.active_inputs_map = active_inputs_map
+    return Variable(reduced_batch), Variable(active_dim), active_dim_map
 
-  def __init_w(self):
+  def __init_encode_w(self):
     active_inputs = self.active_inputs
     _encode_w = self.auto_encoder.encode_w
     _encode_b = self.auto_encoder.encode_b
 
-    _decode_w = self.auto_encoder.decode_w
-    _decode_b = self.auto_encoder.decode_b
-
-    _last = len(_decode_w) - 1
+    _last = len(_encode_w) - 1
 
     self.encode_w = [_encode_w[0].index_select(1, active_inputs)] \
                     + [_encode_w[i] for i in range(1,len(_encode_w))]
 
     self.encode_b = _encode_b
 
+  def __init_decode_w(self):
+    active_outputs = self.active_outputs
+    _decode_w = self.auto_encoder.decode_w
+    _decode_b = self.auto_encoder.decode_b
+
+    _last = len(_decode_w) - 1
+
     self.decode_w = [_decode_w[i] for i in range(len(_decode_w) - 1)] \
-                    + [_decode_w[_last].index_select(0, active_inputs) ]
+                    + [_decode_w[_last].index_select(0, active_outputs) ]
 
     self.decode_b = [_decode_b[i] for i in range(len(_decode_b) - 1)] \
-                    + [_decode_b[_last].index_select(0, active_inputs)]
+                    + [_decode_b[_last].index_select(0, active_outputs)]
+
 
   def encode(self, x):
     return encode(x, self.encode_w, self.encode_b,
                   self._e_activation_type, dp_drop_prob=self._dp_drop_prob,
-                  training=self._training)
+                  training=self.training)
 
   def decode(self, z):
     return decode(z, self.decode_w, self.decode_b,
                   self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
-                  training=self._training)
+                  training=self.training)
 
   def forward(self):
-    return self.decode(self.encode(self.reduced_batch))
+    return self.decode(self.encode(self.reduced_batch_in))
