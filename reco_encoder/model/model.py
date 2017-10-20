@@ -28,6 +28,17 @@ def activation(input, kind):
   else:
     raise ValueError('Unknown non-linearity type')
 
+def loss(type, size_average=False):
+  if type == 'MSE':
+    return nn.MSELoss(size_average=size_average)
+  elif type == 'SoftMarginLoss':
+    return nn.SoftMarginLoss(size_average=size_average)
+
+def compute_loss(type, inputs, targets, size_average=False):
+  mask = targets != 0
+  num_ratings = torch.sum(mask.float())
+  criterion = loss(type, size_average=size_average)
+  return criterion(inputs * mask.float(), targets), Variable(torch.Tensor([1.0])) if size_average else num_ratings
 
 def MSEloss(inputs, targets, size_avarage=False):
   mask = targets != 0
@@ -59,7 +70,7 @@ def decode(z, decode_w, decode_b, activation_type, dp_drop_prob=None, training=F
 
 class AutoEncoder(nn.Module):
   def __init__(self, layer_sizes, activation_type='selu', last_layer_act='none',
-               is_constrained=True, dp_drop_prob=0.0):
+               is_constrained=False, dp_drop_prob=0.0):
     super(AutoEncoder, self).__init__()
 
     self._activation_type = activation_type
