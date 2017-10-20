@@ -70,7 +70,7 @@ class uRecAutoEncoderTest(unittest.TestCase):
     print("Vector dim: {}".format(data_layer.vector_dim))
     print("Total items found: {}".format(len(data_layer.data.keys())))
     self.assertTrue(len(data_layer.data.keys())>0)
-    encoder = AutoEncoder(layer_sizes=[data_layer.vector_dim, 128, data_layer.vector_dim],training=True)
+    encoder = AutoEncoder(layer_sizes=[data_layer.vector_dim, 128, data_layer.vector_dim])
     optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
     for epoch in range(1):
       for i, mb in enumerate(data_layer.iterate_one_epoch()):
@@ -122,12 +122,13 @@ class SparseBatchAutoEncoderTest(unittest.TestCase):
     print("Vector dim: {}".format(data_layer.vector_dim))
     print("Total items found: {}".format(len(data_layer.data.keys())))
     self.assertTrue(len(data_layer.data.keys())>0)
-    encoder = AutoEncoder(layer_sizes=[data_layer.vector_dim, 128, data_layer.vector_dim],training=True)
+    encoder = AutoEncoder(layer_sizes=[data_layer.vector_dim, 128, data_layer.vector_dim])
     optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
+    # encoder.train()
     for epoch in range(1):
       for i, mb in enumerate(data_layer.iterate_one_epoch()):
         sparse_ae = SparseBatchAutoEncoder(encoder,mb)
-        inputs = sparse_ae.reduced_batch
+        inputs = sparse_ae.reduced_batch_in
         optimizer.zero_grad()
         outputs = sparse_ae()
         loss, num_ratings = MSEloss(outputs, inputs)
