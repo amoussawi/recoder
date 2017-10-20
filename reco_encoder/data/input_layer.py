@@ -3,6 +3,7 @@
 from os import listdir, path
 from random import shuffle
 import torch
+from data_utils.utils import read_csv
 
 class UserItemRecDataProvider:
   def __init__(self, params, user_id_map=None, item_id_map=None):
@@ -39,18 +40,16 @@ class UserItemRecDataProvider:
     self.data = dict()
 
     for source_file in src_files:
-      with open(source_file, 'r') as src:
-        for line in src.readlines():
-          parts = line.strip().split(self._delimiter)
-          if len(parts)<3:
-            raise ValueError('Encountered badly formatted line in {}'.format(source_file))
-          key = major_map[int(parts[self._major_ind])]
-          value = minor_map[int(parts[self._minor_ind])]
-          rating = float(parts[self._r_id])
-          #print("Key: {}, Value: {}, Rating: {}".format(key, value, rating))
-          if key not in self.data:
-            self.data[key] = []
-          self.data[key].append((value, rating))
+      for row in read_csv(source_file,has_columns=False,delimiter=self._delimiter):
+        if len(row)<3:
+          raise ValueError('Encountered badly formatted line in {}'.format(source_file))
+        key = major_map[row[self._major_ind]]
+        value = minor_map[row[self._minor_ind]]
+        rating = float(row[self._r_id])
+        #print("Key: {}, Value: {}, Rating: {}".format(key, value, rating))
+        if key not in self.data:
+          self.data[key] = []
+        self.data[key].append((value, rating))
 
   def _build_maps(self):
     self._user_id_map = dict()
@@ -63,21 +62,19 @@ class UserItemRecDataProvider:
     u_id = 0
     i_id = 0
     for source_file in src_files:
-      with open(source_file, 'r') as src:
-        for line in src.readlines():
-          parts = line.strip().split(self._delimiter)
-          if len(parts)<3:
-            raise ValueError('Encountered badly formatted line in {}'.format(source_file))
+      for row in read_csv(source_file,has_columns=False,delimiter=self._delimiter):
+        if len(row)<3:
+          raise ValueError('Encountered badly formatted line in {}'.format(source_file))
 
-          u_id_orig = int(parts[self._u_id])
-          if u_id_orig not in self._user_id_map:
-            self._user_id_map[u_id_orig] = u_id
-            u_id += 1
+        u_id_orig = row[self._u_id]
+        if u_id_orig not in self._user_id_map:
+          self._user_id_map[u_id_orig] = u_id
+          u_id += 1
 
-          i_id_orig = int(parts[self._i_id])
-          if i_id_orig not in self._item_id_map:
-            self._item_id_map[i_id_orig] = i_id
-            i_id += 1
+        i_id_orig = row[self._i_id]
+        if i_id_orig not in self._item_id_map:
+          self._item_id_map[i_id_orig] = i_id
+          i_id += 1
 
 
   def iterate_one_epoch(self):
