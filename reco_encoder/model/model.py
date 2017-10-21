@@ -78,8 +78,11 @@ class AutoEncoder(nn.Module):
       self._activation_type = [self._activation_type] * (len(layer_sizes) - 1)
 
     self._e_activation_type = self._activation_type
+
     self._d_activation_type = list(self._activation_type)
-    self._d_activation_type[len(self._d_activation_type) - 1] = last_layer_act
+    self._d_activation_type.reverse()
+    del self._d_activation_type[0]
+    self._d_activation_type.append(last_layer_act)
 
     self._dp_drop_prob = dp_drop_prob
     if type(self._dp_drop_prob) is float:
@@ -170,6 +173,7 @@ class SparseBatchAutoEncoder(nn.Module):
       self.active_outputs = self.active_inputs
       self.active_outputs_map = self.active_inputs_map
     else:
+      self._sparse_batch_out = sparse_batch_out
       self.reduced_batch_out, self.active_outputs, self.active_outputs_map \
                     = self.__generate_reduced_batch(self._sparse_batch_out)
 
