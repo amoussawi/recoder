@@ -28,17 +28,11 @@ def activation(input, kind):
   else:
     raise ValueError('Unknown non-linearity type')
 
-def loss(type, size_average=False):
-  if type == 'MSE':
-    return nn.MSELoss(size_average=size_average)
-  elif type == 'SoftMarginLoss':
-    return nn.SoftMarginLoss(size_average=size_average)
-
-def compute_loss(type, inputs, targets, size_average=False):
+def SoftMarginLoss(inputs, targets, size_average=False):
   mask = targets != 0
   num_ratings = torch.sum(mask.float())
-  criterion = loss(type, size_average=size_average)
-  return criterion(inputs * mask.float(), targets), Variable(torch.Tensor([1.0])) if size_average else num_ratings
+  criterion = mSoftMarginLoss(size_average=size_average)
+  return criterion(inputs * mask.float(), targets, mask.float()), Variable(torch.Tensor([1.0])) if size_average else num_ratings
 
 def MSEloss(inputs, targets, size_avarage=False):
   mask = targets != 0
@@ -241,3 +235,20 @@ class SparseBatchAutoEncoder(nn.Module):
 
   def forward(self):
     return self.decode(self.encode(self.reduced_batch_in))
+
+
+class mSoftMarginLoss(nn.Module):
+
+  def __init__(self, size_average=True):
+      super(mSoftMarginLoss, self).__init__()
+      self.size_average = size_average
+
+  def forward(self, input, target, mask=None):
+    loss = (((- input * target).exp()) + 1).log()
+    if not mask is None:
+      loss = loss * mask
+    loss = loss.sum()
+    if self.size_average:
+      _num_elements = input.size()[0] * input.size()[1]
+      loss = loss / _num_elements
+    return loss
