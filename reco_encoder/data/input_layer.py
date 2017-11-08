@@ -26,6 +26,12 @@ class UserItemRecDataProvider:
     else:
       self._user_id_map = user_id_map
       self._item_id_map = item_id_map
+      self._user_id_inverse_map = dict()
+      self._item_id_inverse_map = dict()
+      for user in self._user_id_map:
+        self._user_id_inverse_map[self._user_id_map[user]] = user
+      for item in self._item_id_map:
+        self._item_id_inverse_map[self._item_id_map[item]] = item
 
     major_map = self._item_id_map if self._major == 'items' else self._user_id_map
     minor_map = self._user_id_map if self._major == 'items' else self._item_id_map
@@ -54,6 +60,8 @@ class UserItemRecDataProvider:
   def _build_maps(self):
     self._user_id_map = dict()
     self._item_id_map = dict()
+    self._user_id_inverse_map = dict()
+    self._item_id_inverse_map = dict()
 
     src_files = [path.join(self._data_dir, f)
                  for f in listdir(self._data_dir)
@@ -69,11 +77,13 @@ class UserItemRecDataProvider:
         u_id_orig = row[self._u_id]
         if u_id_orig not in self._user_id_map:
           self._user_id_map[u_id_orig] = u_id
+          self._user_id_inverse_map[u_id] = u_id_orig
           u_id += 1
 
         i_id_orig = row[self._i_id]
         if i_id_orig not in self._item_id_map:
           self._item_id_map[i_id_orig] = i_id
+          self._item_id_inverse_map[i_id] = i_id_orig
           i_id += 1
 
 
@@ -139,6 +149,14 @@ class UserItemRecDataProvider:
   @property
   def itemIdMap(self):
     return self._item_id_map
+
+  @property
+  def userIdInverseMap(self):
+    return self._user_id_inverse_map
+
+  @property
+  def itemIdInverseMap(self):
+    return self._item_id_inverse_map
 
   @property
   def params(self):
