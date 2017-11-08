@@ -1,66 +1,10 @@
-# Copyright (c) 2017 NVIDIA Corporation
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.nn.init as weight_init
 from torch.autograd import Variable
-
 import torch.sparse as sparse
 import numpy as np
-
-def activation(input, kind):
-  if kind == 'selu':
-    return F.selu(input)
-  elif kind == 'relu':
-    return F.relu(input)
-  elif kind == 'relu6':
-    return F.relu6(input)
-  elif kind == 'sigmoid':
-    return F.sigmoid(input)
-  elif kind == 'tanh':
-    return F.tanh(input)
-  elif kind == 'elu':
-    return F.elu(input)
-  elif kind == 'lrelu':
-    return F.leaky_relu(input)
-  elif kind == 'none':
-    return input
-  else:
-    raise ValueError('Unknown non-linearity type')
-
-def SoftMarginLoss(inputs, targets, size_average=False):
-  mask = targets != 0
-  num_ratings = torch.sum(mask.float())
-  criterion = mSoftMarginLoss(size_average=size_average)
-  return criterion(inputs * mask.float(), targets, mask.float()), Variable(torch.Tensor([1.0])) if size_average else num_ratings
-
-def MSEloss(inputs, targets, size_avarage=False):
-  mask = targets != 0
-  num_ratings = torch.sum(mask.float())
-  criterion = nn.MSELoss(size_average=size_avarage)
-  return criterion(inputs * mask.float(), targets), Variable(torch.Tensor([1.0])) if size_avarage else num_ratings
-
-
-def encode(x, encode_w, encode_b, activation_type, dp_drop_prob=None, training=False):
-  _dp_drop_prob = dp_drop_prob
-  if _dp_drop_prob is None:
-    _dp_drop_prob = [0.0] * len(encode_w)
-
-  if len(_dp_drop_prob) != len(encode_w):
-    raise ValueError('dropout values list and list of weights should have equal length')
-
-  if len(activation_type) != len(encode_w):
-    raise ValueError('layers activation types list and list of weights should have equal length')
-
-  for ind, w in enumerate(encode_w):
-    x = activation(input=F.linear(input=x, weight=w,bias=encode_b[ind]),kind=activation_type[ind])
-    if _dp_drop_prob[ind] > 0:
-      x = F.dropout(x, p=_dp_drop_prob[ind], training=training, inplace=False)
-  return x
-
-def decode(z, decode_w, decode_b, activation_type, dp_drop_prob=None, training=False):
-  return encode(z, decode_w, decode_b, activation_type, dp_drop_prob=dp_drop_prob, training=training)
-
+import autoencoder.functional as functional
 
 class AutoEncoder(nn.Module):
   def __init__(self, layer_sizes, activation_type='selu', last_layer_act='none',
@@ -107,35 +51,13 @@ class AutoEncoder(nn.Module):
     self.decode_b = nn.ParameterList(
       [nn.Parameter(torch.zeros(reversed_enc_layers[i + 1])) for i in range(len(reversed_enc_layers) - 1)])
 
-    print("******************************")
-    print("******************************")
-    print(layer_sizes)
-    print("Dropout drop probability: {}".format(self._dp_drop_prob))
-    print("Encoder pass:")
-    for ind, w in enumerate(self.encode_w):
-      print(w.data.size())
-      print(self.encode_b[ind].size())
-    print("Decoder pass:")
-    if self.is_constrained:
-      print('Decoder is constrained')
-      for ind, w in enumerate(list(reversed(self.encode_w))):
-        print(w.transpose(0, 1).size())
-        print(self.decode_b[ind].size())
-    else:
-      for ind, w in enumerate(self.decode_w):
-        print(w.data.size())
-        print(self.decode_b[ind].size())
-    print("******************************")
-    print("******************************")
-
-
   def encode(self, x):
-    return encode(x, self.encode_w, self.encode_b,
+    return functional.encode(x, self.encode_w, self.encode_b,
                   self._e_activation_type, dp_drop_prob=self._dp_drop_prob,
                   training=self.training)
 
   def decode(self, z):
-    return decode(z, self.decode_w, self.decode_b,
+    return functional.decode(z, self.decode_w, self.decode_b,
                   self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
                   training=self.training)
 
@@ -159,16 +81,17 @@ class SparseBatchAutoEncoder(nn.Module):
     self.training = auto_encoder.training
 
     self._sparse_batch_in = sparse_batch_in
-    self.reduced_batch_in, self.active_inputs, self.active_inputs_map \
+    self.reduced_batch_in, self.active_inputs, self.active_inputs_map, self.active_inputs_inverse_map \
                               = self.__generate_reduced_batch(self._sparse_batch_in)
 
     if sparse_batch_out is None:
       self._sparse_batch_out = self._sparse_batch_in
       self.active_outputs = self.active_inputs
       self.active_outputs_map = self.active_inputs_map
+      self.active_outputs_inverse_map = self.active_inputs_inverse_map
     else:
       self._sparse_batch_out = sparse_batch_out
-      self.reduced_batch_out, self.active_outputs, self.active_outputs_map \
+      self.reduced_batch_out, self.active_outputs, self.active_outputs_map, self.active_outputs_inverse_map \
                     = self.__generate_reduced_batch(self._sparse_batch_out)
 
     self.__init_encode_w()
@@ -185,8 +108,10 @@ class SparseBatchAutoEncoder(nn.Module):
     active_dim = sparse_batch._indices()[1]
     active_dim = torch.from_numpy(np.unique(active_dim.numpy()))
     active_dim_map = {}
+    active_dim_inverse_map = {}
     for ind, inp in enumerate(active_dim):
       active_dim_map[inp] = ind
+      active_dim_inverse_map[ind] = inp
 
     reduced_batch_size = torch.Size([sparse_batch.size(0),active_dim.size(0)])
     reduced_batch = torch.zeros(reduced_batch_size)
@@ -195,7 +120,7 @@ class SparseBatchAutoEncoder(nn.Module):
     for i in range(_indices.size(1)):
       reduced_batch[_indices[0][i]][active_dim_map[_indices[1][i]]] = sparse_batch._values()[i]
 
-    return Variable(reduced_batch), Variable(active_dim), active_dim_map
+    return Variable(reduced_batch), Variable(active_dim), active_dim_map, active_dim_inverse_map
 
   def __init_encode_w(self):
     active_inputs = self.active_inputs
@@ -224,31 +149,43 @@ class SparseBatchAutoEncoder(nn.Module):
 
 
   def encode(self, x):
-    return encode(x, self.encode_w, self.encode_b,
+    return functional.encode(x, self.encode_w, self.encode_b,
                   self._e_activation_type, dp_drop_prob=self._dp_drop_prob,
                   training=self.training)
 
   def decode(self, z):
-    return decode(z, self.decode_w, self.decode_b,
+    return functional.decode(z, self.decode_w, self.decode_b,
                   self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
                   training=self.training)
 
-  def forward(self):
-    return self.decode(self.encode(self.reduced_batch_in))
+  def forward(self, x=None):
+    if x is None:
+      x = self.reduced_batch_in
+    return self.decode(self.encode(x))
 
 
-class mSoftMarginLoss(nn.Module):
+class Noise(nn.Module):
+  def __init__(self):
+    super(Noise, self).__init__()
 
-  def __init__(self, size_average=True):
-      super(mSoftMarginLoss, self).__init__()
-      self.size_average = size_average
+  def forward(self, input):
+    raise NotImplementedError
 
-  def forward(self, input, target, mask=None):
-    loss = (((- input * target).exp()) + 1).log()
-    if not mask is None:
-      loss = loss * mask
-    loss = loss.sum()
-    if self.size_average:
-      _num_elements = input.size()[0] * input.size()[1]
-      loss = loss / _num_elements
-    return loss
+
+class BernoulliNoise(Noise):
+  def __init__(self, pb, noise=0):
+    super(BernoulliNoise, self).__init__()
+    self.pb = pb
+    self.noise = noise
+
+  def forward(self, input):
+    corrupted_input = functional.bernoulli_noise(input=input, pb=self.pb, noise=self.noise)
+    return corrupted_input
+
+
+class GaussianNoise(Noise):
+  def __init__(self):
+    super(GaussianNoise, self).__init__()
+
+  def forward(self, input):
+    raise NotImplementedError
