@@ -108,21 +108,24 @@ class UserItemRecDataProvider:
       v_torch = torch.FloatTensor(vals)
 
       mini_batch = torch.sparse.FloatTensor(i_torch, v_torch, torch.Size([self._batch_size, self._vector_dim]))
+
       s_ind += self._batch_size
       e_ind += self._batch_size
+
       yield  mini_batch
 
-  def iterate_one_epoch_eval(self, for_inf=False):
+  def iterate_one_epoch_eval(self, src_data_layer, for_inf=False):
     keys = list(self.data.keys())
     s_ind = 0
+    src_data = src_data_layer.data
     while s_ind < len(keys):
       inds1 = [0] * len([v[0] for v in self.data[keys[s_ind]]])
       inds2 = [v[0] for v in self.data[keys[s_ind]]]
       vals = [v[1] for v in self.data[keys[s_ind]]]
 
-      src_inds1 = [0] * len([v[0] for v in self.src_data[keys[s_ind]]])
-      src_inds2 = [v[0] for v in self.src_data[keys[s_ind]]]
-      src_vals = [v[1] for v in self.src_data[keys[s_ind]]]
+      src_inds1 = [0] * len([v[0] for v in src_data[keys[s_ind]]])
+      src_inds2 = [v[0] for v in src_data[keys[s_ind]]]
+      src_vals = [v[1] for v in src_data[keys[s_ind]]]
 
       i_torch = torch.LongTensor([inds1, inds2])
       v_torch = torch.FloatTensor(vals)
