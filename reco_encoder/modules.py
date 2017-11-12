@@ -286,8 +286,6 @@ class AutoEncoderRecommender(object):
     total_num_ratings = 0.0
 
     total_epoch_loss = 0.0
-    predictions_vec = np.array([])
-    groundtruth_vec = np.array([])
 
     for i, (eval, src) in enumerate(self.eval_data_layer.iterate_one_epoch_eval(src_data_layer=self.train_data_layer)):
       inputs = src
@@ -301,13 +299,6 @@ class AutoEncoderRecommender(object):
       loss, num_ratings = self.compute_loss(outputs, targets)
       total_epoch_loss += loss.data[0]
       total_num_ratings += num_ratings.data[0]
-
-      targets_vec = targets.data.numpy().reshape(-1)
-      targets_mask = np.abs(targets_vec) == 1
-      targets_vec = targets_vec[targets_mask]
-      outputs_vec = outputs.data.numpy().reshape(-1)[targets_mask]
-      predictions_vec = np.append(predictions_vec, outputs_vec)
-      groundtruth_vec = np.append(groundtruth_vec, targets_vec)
 
     total_epoch_loss = total_epoch_loss / total_num_ratings
 
