@@ -46,10 +46,16 @@ class AutoEncoder(nn.Module):
     else:
       self.decode_w = list(reversed(self.encode_w))
       for ind, w in enumerate(self.decode_w):
-        self.decode_w[ind] = w.transpose(0,1)
+        self.decode_w[ind] = w.permute(1,0)
+
 
     self.decode_b = nn.ParameterList(
       [nn.Parameter(torch.zeros(reversed_enc_layers[i + 1])) for i in range(len(reversed_enc_layers) - 1)])
+
+  def update_constrained_decode_w(self):
+    self.decode_w = list(reversed(self.encode_w))
+    for ind, w in enumerate(self.decode_w):
+      self.decode_w[ind] = w.permute(1,0)
 
   def encode(self, x):
     return functional.encode(x, self.encode_w, self.encode_b,
@@ -57,9 +63,12 @@ class AutoEncoder(nn.Module):
                   training=self.training)
 
   def decode(self, z):
+    if self.is_constrained:
+      self.update_constrained_decode_w()
     return functional.decode(z, self.decode_w, self.decode_b,
                   self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
                   training=self.training)
+
 
   def forward(self, x):
     return self.decode(self.encode(x))
@@ -67,7 +76,7 @@ class AutoEncoder(nn.Module):
 
 class SparseBatchAutoEncoder(nn.Module):
 
-  def __init__(self, auto_encoder, sparse_batch_in, sparse_batch_out=None):
+  def __init__(self, auto_encoder, sparse_batch_in, sparse_batch_out=None, full_output=False):
     super(SparseBatchAutoEncoder, self).__init__()
 
     self.auto_encoder = auto_encoder
@@ -77,8 +86,9 @@ class SparseBatchAutoEncoder(nn.Module):
     self._d_activation_type = auto_encoder._d_activation_type
 
     self._dp_drop_prob = auto_encoder._dp_drop_prob
-
+    self.full_output = full_output
     self.training = auto_encoder.training
+    self.is_constrained = auto_encoder.is_constrained
 
     self._sparse_batch_in = sparse_batch_in
     self.reduced_batch_in, self.active_inputs, self.active_inputs_map, self.active_inputs_inverse_map \
@@ -135,18 +145,22 @@ class SparseBatchAutoEncoder(nn.Module):
     self.encode_b = _encode_b
 
   def __init_decode_w(self):
-    active_outputs = self.active_outputs
     _decode_w = self.auto_encoder.decode_w
     _decode_b = self.auto_encoder.decode_b
 
-    _last = len(_decode_w) - 1
+    if not self.full_output:
+      active_outputs = self.active_outputs
 
-    self.decode_w = [_decode_w[i] for i in range(len(_decode_w) - 1)] \
-                    + [_decode_w[_last].index_select(0, active_outputs) ]
+      _last = len(_decode_w) - 1
 
-    self.decode_b = [_decode_b[i] for i in range(len(_decode_b) - 1)] \
-                    + [_decode_b[_last].index_select(0, active_outputs)]
+      self.decode_w = [_decode_w[i] for i in range(len(_decode_w) - 1)] \
+                      + [_decode_w[_last].index_select(0, active_outputs) ]
 
+      self.decode_b = [_decode_b[i] for i in range(len(_decode_b) - 1)] \
+                      + [_decode_b[_last].index_select(0, active_outputs)]
+    else:
+      self.decode_w = _decode_w
+      self.decode_b = _decode_b
 
   def encode(self, x):
     return functional.encode(x, self.encode_w, self.encode_b,
@@ -154,6 +168,10 @@ class SparseBatchAutoEncoder(nn.Module):
                   training=self.training)
 
   def decode(self, z):
+    if self.is_constrained:
+      self.auto_encoder.update_constrained_decode_w()
+      self.__init_decode_w()
+
     return functional.decode(z, self.decode_w, self.decode_b,
                   self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
                   training=self.training)
