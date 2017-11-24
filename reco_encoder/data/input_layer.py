@@ -4,6 +4,7 @@ from os import listdir, path
 from random import shuffle
 import torch
 from data_utils.utils import read_csv
+import numpy as np
 
 class UserItemRecDataProvider:
   def __init__(self, params, user_id_map=None, item_id_map=None):
@@ -20,7 +21,8 @@ class UserItemRecDataProvider:
     self._major_ind = self._i_id if self._major == 'items' else self._u_id
     self._minor_ind = self._u_id if self._major == 'items' else self._i_id
     self._delimiter = '\t' if 'delimiter' not in self.params else self.params['delimiter']
-
+    self.rating_np_dtype = params['rating_np_dtype'] if 'rating_np_dtype' in params else np.float
+    self.minor_np_dtype = params['minor_np_dtype'] if 'minor_np_dtype' in params else np.int
     if user_id_map is None or item_id_map is None:
       self._build_maps()
     else:
@@ -54,8 +56,13 @@ class UserItemRecDataProvider:
         rating = float(row[self._r_id])
         #print("Key: {}, Value: {}, Rating: {}".format(key, value, rating))
         if key not in self.data:
-          self.data[key] = []
-        self.data[key].append((value, rating))
+          self.data[key] = {'minor':[], 'rating': []}
+        self.data[key]['minor'].append(value)
+        self.data[key]['rating'].append(rating)
+
+    for major in self.data:
+      self.data[major]['minor'] = np.array(self.data[major]['minor'], dtype=self.minor_np_dtype)
+      self.data[major]['rating'] = np.array(self.data[major]['rating'], dtype=self.rating_np_dtype)
 
   def _build_maps(self):
     self._user_id_map = dict()
@@ -99,9 +106,9 @@ class UserItemRecDataProvider:
       inds2 = []
       vals = []
       for ind in range(s_ind, e_ind):
-        inds2 += [v[0] for v in data[keys[ind]]]
-        inds1 += [local_ind]*len([v[0] for v in data[keys[ind]]])
-        vals += [v[1] for v in data[keys[ind]]]
+        inds2 += [np.int(v) for v in data[keys[ind]]['minor']]
+        inds1 += [local_ind]*len(data[keys[ind]]['minor'])
+        vals += [np.float(v) for v in data[keys[ind]]['rating']]
         local_ind += 1
 
       i_torch = torch.LongTensor([inds1, inds2])
@@ -119,13 +126,13 @@ class UserItemRecDataProvider:
     s_ind = 0
     src_data = src_data_layer.data
     while s_ind < len(keys):
-      inds1 = [0] * len([v[0] for v in self.data[keys[s_ind]]])
-      inds2 = [v[0] for v in self.data[keys[s_ind]]]
-      vals = [v[1] for v in self.data[keys[s_ind]]]
+      inds1 = [0] * len(self.data[keys[s_ind]]['minor'])
+      inds2 = [np.int(v) for v in self.data[keys[s_ind]]['minor']]
+      vals = [np.float(v) for v in self.data[keys[s_ind]]['rating']]
 
-      src_inds1 = [0] * len([v[0] for v in src_data[keys[s_ind]]])
-      src_inds2 = [v[0] for v in src_data[keys[s_ind]]]
-      src_vals = [v[1] for v in src_data[keys[s_ind]]]
+      src_inds1 = [0] * len(src_data[keys[s_ind]]['minor'])
+      src_inds2 = [np.int(v) for v in src_data[keys[s_ind]]['minor']]
+      src_vals = [np.float(v) for v in src_data[keys[s_ind]]['rating']]
 
       i_torch = torch.LongTensor([inds1, inds2])
       v_torch = torch.FloatTensor(vals)
