@@ -364,3 +364,15 @@ class SoftMarginLoss(nn.Module):
       _num_elements = input.size()[0] * input.size()[1]
       loss = loss / _num_elements
     return loss
+
+class MSELoss(nn.Module):
+  def __init__(self, size_average=True):
+    super(MSELoss, self).__init__()
+    self.size_average = size_average
+
+  def forward(self, input, target, weights=None):
+    if not weights is None:
+      input = input * weights.sqrt()
+      target = target * weights.sqrt()
+    return F.mse_loss(input, target, size_average=self.size_average)
+  
