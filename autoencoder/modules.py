@@ -63,7 +63,7 @@ class AutoEncoder(nn.Module):
                   training=self.training)
 
   def decode(self, z):
-    if self.is_constrained:
+    if self.is_constrained and self.training:
       self.update_constrained_decode_w()
     return functional.decode(z, self.decode_w, self.decode_b,
                   self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
@@ -168,7 +168,7 @@ class SparseBatchAutoEncoder(nn.Module):
                   training=self.training)
 
   def decode(self, z):
-    if self.is_constrained:
+    if self.is_constrained and self.training:
       self.auto_encoder.update_constrained_decode_w()
       self.__init_decode_w()
 
