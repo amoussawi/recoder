@@ -7,7 +7,7 @@ from data_utils.utils import read_csv
 import numpy as np
 
 class UserItemRecDataProvider:
-  def __init__(self, params, user_id_map=None, item_id_map=None):
+  def __init__(self, params, user_id_map=None, item_id_map=None, only_maps=False):
     self._params = params
     self._data_dir = self.params['data_dir']
     self._extension = ".txt" if 'extension' not in self.params else self.params['extension']
@@ -44,25 +44,25 @@ class UserItemRecDataProvider:
                   if path.isfile(path.join(self._data_dir, f)) and f.endswith(self._extension)]
 
     self._batch_size = self.params['batch_size']
-
+    self.only_maps = only_maps
     self.data = dict()
+    if not self.only_maps:
+      for source_file in src_files:
+        for row in read_csv(source_file,has_columns=False,delimiter=self._delimiter):
+          if len(row)<3:
+            raise ValueError('Encountered badly formatted line in {}'.format(source_file))
+          key = major_map[row[self._major_ind]]
+          value = minor_map[row[self._minor_ind]]
+          rating = float(row[self._r_id])
+          #print("Key: {}, Value: {}, Rating: {}".format(key, value, rating))
+          if key not in self.data:
+            self.data[key] = {'minor':[], 'rating': []}
+          self.data[key]['minor'].append(value)
+          self.data[key]['rating'].append(rating)
 
-    for source_file in src_files:
-      for row in read_csv(source_file,has_columns=False,delimiter=self._delimiter):
-        if len(row)<3:
-          raise ValueError('Encountered badly formatted line in {}'.format(source_file))
-        key = major_map[row[self._major_ind]]
-        value = minor_map[row[self._minor_ind]]
-        rating = float(row[self._r_id])
-        #print("Key: {}, Value: {}, Rating: {}".format(key, value, rating))
-        if key not in self.data:
-          self.data[key] = {'minor':[], 'rating': []}
-        self.data[key]['minor'].append(value)
-        self.data[key]['rating'].append(rating)
-
-    for major in self.data:
-      self.data[major]['minor'] = np.array(self.data[major]['minor'], dtype=self.minor_np_dtype)
-      self.data[major]['rating'] = np.array(self.data[major]['rating'], dtype=self.rating_np_dtype)
+      for major in self.data:
+        self.data[major]['minor'] = np.array(self.data[major]['minor'], dtype=self.minor_np_dtype)
+        self.data[major]['rating'] = np.array(self.data[major]['rating'], dtype=self.rating_np_dtype)
 
   def _build_maps(self):
     self._user_id_map = dict()
@@ -100,7 +100,7 @@ class UserItemRecDataProvider:
     shuffle(keys)
     s_ind = 0
     e_ind = self._batch_size
-    while e_ind < len(keys):
+    while s_ind < e_ind and e_ind <= len(keys):
       local_ind = 0
       inds1 = []
       inds2 = []
@@ -114,10 +114,10 @@ class UserItemRecDataProvider:
       i_torch = torch.LongTensor([inds1, inds2])
       v_torch = torch.FloatTensor(vals)
 
-      mini_batch = torch.sparse.FloatTensor(i_torch, v_torch, torch.Size([self._batch_size, self._vector_dim]))
+      mini_batch = torch.sparse.FloatTensor(i_torch, v_torch, torch.Size([e_ind - s_ind, self._vector_dim]))
 
       s_ind += self._batch_size
-      e_ind += self._batch_size
+      e_ind = min(e_ind + self._batch_size, len(keys))
 
       yield  mini_batch
 
@@ -125,14 +125,26 @@ class UserItemRecDataProvider:
     keys = list(self.data.keys())
     s_ind = 0
     src_data = src_data_layer.data
-    while s_ind < len(keys):
-      inds1 = [0] * len(self.data[keys[s_ind]]['minor'])
-      inds2 = [np.int(v) for v in self.data[keys[s_ind]]['minor']]
-      vals = [np.float(v) for v in self.data[keys[s_ind]]['rating']]
+    shuffle(keys)
+    s_ind = 0
+    e_ind = self._batch_size
+    while s_ind < e_ind and e_ind <= len(keys):
+      local_ind = 0
+      inds1 = []
+      inds2 = []
+      vals = []
+      src_inds1 = []
+      src_inds2 = []
+      src_vals = []
+      for ind in range(s_ind, e_ind):
+        inds1 += [local_ind] * len(self.data[keys[ind]]['minor'])
+        inds2 += [np.int(v) for v in self.data[keys[ind]]['minor']]
+        vals += [np.float(v) for v in self.data[keys[ind]]['rating']]
 
-      src_inds1 = [0] * len(src_data[keys[s_ind]]['minor'])
-      src_inds2 = [np.int(v) for v in src_data[keys[s_ind]]['minor']]
-      src_vals = [np.float(v) for v in src_data[keys[s_ind]]['rating']]
+        src_inds1 += [local_ind] * len(src_data[keys[ind]]['minor'])
+        src_inds2 += [np.int(v) for v in src_data[keys[ind]]['minor']]
+        src_vals += [np.float(v) for v in src_data[keys[ind]]['rating']]
+        local_ind += 1
 
       i_torch = torch.LongTensor([inds1, inds2])
       v_torch = torch.FloatTensor(vals)
@@ -140,9 +152,12 @@ class UserItemRecDataProvider:
       src_i_torch = torch.LongTensor([src_inds1, src_inds2])
       src_v_torch = torch.FloatTensor(src_vals)
 
-      mini_batch = (torch.sparse.FloatTensor(i_torch, v_torch, torch.Size([1, self._vector_dim])),
-                    torch.sparse.FloatTensor(src_i_torch, src_v_torch, torch.Size([1, self._vector_dim])))
-      s_ind += 1
+      mini_batch = (torch.sparse.FloatTensor(i_torch, v_torch, torch.Size([e_ind - s_ind, self._vector_dim])),
+                    torch.sparse.FloatTensor(src_i_torch, src_v_torch, torch.Size([e_ind - s_ind, self._vector_dim])))
+
+      s_ind += self._batch_size
+      e_ind = min(e_ind + self._batch_size, len(keys))
+
       if not for_inf:
         yield  mini_batch
       else:
