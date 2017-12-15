@@ -22,6 +22,10 @@ class AutoEncoderRecommender(object):
     if 'model' in self.params:
       self.__load_last_state(self.params['model'])
 
+    if self.mode == 'model':
+      self.__create_model()
+      return
+
     self.batch_size = self.params['batch_size']
     self.major = self.params['major']
     self.item_id_ind = self.params['item_id_ind']
@@ -76,6 +80,9 @@ class AutoEncoderRecommender(object):
       self.is_constrained = self._model_last_state['is_constrained']
       self.dropout_prob = self._model_last_state['dropout_prob']
 
+    self.__create_model()
+
+  def __create_model(self):
     self.autoencoder = AutoEncoder(layer_sizes=[self.vector_dim] + [int(l) for l in self.hidden_layers_sizes],
                                    activation_type=self.activation_type,
                                    is_constrained=self.is_constrained,
@@ -209,6 +216,22 @@ class AutoEncoderRecommender(object):
     if not os.path.isfile(model_file):
       raise Exception('No state file found in {}'.format(model_file))
     self._model_last_state = torch.load(model_file)
+    self.vector_dim = self._model_last_state['vector_dim']
+    print(self.vector_dim)
+    self.hidden_layers_sizes = self._model_last_state['hidden_layers_sizes']
+    self.is_constrained = self._model_last_state['is_constrained']
+    self.dropout_prob = self._model_last_state['dropout_prob']
+    self.activation_type = self._model_last_state['activation_type']
+    self.last_layer_act = self._model_last_state['last_layer_act']
+    self.user_id_map = self._model_last_state['user_id_map']
+    self.item_id_map = self._model_last_state['item_id_map']
+    self.user_id_inverse_map = dict()
+    self.item_id_inverse_map = dict()
+    for user in self.user_id_map:
+      self.user_id_inverse_map[self.user_id_map[user]] = user
+    for item in self.item_id_map:
+      self.item_id_inverse_map[self.item_id_map[item]] = item
+
 
   def save_state(self):
     checkpoint_file = "{}reco_ae_epoch_{}.model".format(self.model_checkpoint, self.current_epoch)
