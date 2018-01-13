@@ -5,13 +5,13 @@ import glog as log
 
 class RecommendationDataset(Dataset):
 
-  def __init__(self, data_file, user_based=True, target_dataset=None,
+  def __init__(self, data_file, item_based=True, target_dataset=None,
                user_dtype=None, item_dtype=None, inter_dtype=np.int32,
                user_col='user', item_col='item', inter_col='inter'):
 
     self.data_file = data_file
 
-    self.user_based = user_based
+    self.item_based = item_based
 
     self.user_dtype = user_dtype
     self.item_dtype = item_dtype
@@ -22,8 +22,8 @@ class RecommendationDataset(Dataset):
     self.inter_col = inter_col
     self.target_dataset = target_dataset # type: RecommendationDataset
 
-    self.index_col = self.user_col if self.user_based else self.item_col
-    self.target_col = self.item_col if self.user_based else self.user_col
+    self.index_col = self.user_col if self.item_based else self.item_col
+    self.target_col = self.item_col if self.item_based else self.user_col
 
     self.__load_data()
 
