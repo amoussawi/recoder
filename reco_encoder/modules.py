@@ -64,10 +64,7 @@ class AutoEncoderRecommender(object):
 
   def __init_training(self):
     self.train_dataset = self.params['train_dataset'] # type: RecommendationDataset
-    self.eval_dataset = self.params['eval_dataset']
-
-    self.vector_dim = self.train_dataset.sample_dim
-    
+    self.eval_dataset = self.params['eval_dataset'] # type: RecommendationDataset
     self.lr = self.params['lr']
     self.weight_decay = self.params['weight_decay']
     self.num_epochs = self.params['num_epochs']
@@ -81,9 +78,15 @@ class AutoEncoderRecommender(object):
     self.finetune = self.params['finetune'] if 'finetune' in self.params else False
     self.noise = self.params['noise'] if 'noise' in self.params else lambda x: x
     self.model_checkpoint = self.params['model_checkpoint'] if 'model_checkpoint' in self.params else 'model/'
+    self.item_based = self.params['item_based']
 
-    self.user_id_map = self.train_dataset.user_id_map
-    self.item_id_map = self.train_dataset.item_id_map
+    self.users = list(set(self.train_dataset.users + self.eval_dataset.users))
+    self.items = list(set(self.train_dataset.items + self.eval_dataset.items))
+
+    self.vector_dim = len(self.items) if self.item_based else len(self.users)
+
+    self.__build_user_map()
+    self.__build_item_map()
 
     self.__init_model()
     self.__init_optimizer()
@@ -97,7 +100,7 @@ class AutoEncoderRecommender(object):
                                     gamma=0.1, last_epoch=self.current_epoch - 1)
 
     self.train_dataloader = DataLoader(self.train_dataset, batch_size=self.batch_size,
-                                       shuffle=True, collate_fn=self.train_dataset.collate_to_sparse_batch)
+                                       shuffle=True, collate_fn=self.collate_to_sparse_batch)
 
   def __init_evaluation(self):
     self.eval_dataset = self.params['eval_dataset'] # type: RecommendationDataset
@@ -105,7 +108,7 @@ class AutoEncoderRecommender(object):
     self.loss_func_type = self.loss_func.__class__.__name__
     self.__init_model()
     self.eval_dataloader = DataLoader(self.eval_dataset, batch_size=self.batch_size,
-                                      shuffle=True, collate_fn=self.eval_dataset.collate_to_sparse_batch)
+                                      shuffle=True, collate_fn=self.collate_to_sparse_batch)
 
   def __init_optimizer(self):
     if self.optimizer_type == "adam":
@@ -135,10 +138,21 @@ class AutoEncoderRecommender(object):
     self.user_id_map = self._model_last_state['user_id_map']
     self.item_id_map = self._model_last_state['item_id_map']
 
+  def __build_user_map(self):
+    self.user_id_map = {}
+    for user_id, user in enumerate(self.users):
+      self.user_id_map[user] = user_id
+
+  def __build_item_map(self):
+    self.item_id_map = {}
+    for item_id, item in enumerate(self.items):
+      self.item_id_map[item] = item_id
+
   def save_state(self):
     checkpoint_file = "{}reco_ae_epoch_{}.model".format(self.model_checkpoint, self.current_epoch)
     log.info("Saving model to {}".format(checkpoint_file))
     current_state = {
+      'item_based': self.item_based,
       'vector_dim': self.vector_dim,
       'hidden_layers_sizes': self.hidden_layers_sizes,
       'activation_type': self.activation_type,
@@ -259,6 +273,42 @@ class AutoEncoderRecommender(object):
     else:
       normalization = Variable(torch.FloatTensor([1]))
     return self.loss_func(output, target, weights), normalization
+
+  def collate_to_sparse_batch(self, batch):
+    _input_batch = [i for i, t in batch]
+    _target_batch = [t for d, t in batch]
+
+    _sparse_input_batch = self.__collate_to_sparse_batch(_input_batch)
+
+    if _input_batch[0] is _target_batch[0]: # If target is input no need to re-compute
+      _sparse_target_batch = _sparse_input_batch
+    else:
+      _sparse_target_batch = self.__collate_to_sparse_batch(_target_batch)
+
+    return _sparse_input_batch, _sparse_target_batch
+
+  def __collate_to_sparse_batch(self, batch):
+    samples_inds = []
+    inter_inds = []
+    inter_val = []
+    batch_size = len(batch)
+
+    _map = self.item_id_map if self.item_based else self.user_id_map
+
+    for sample_i, sample in enumerate(batch):
+      num_values = len(sample)
+      samples_inds += [sample_i] * num_values
+      for target, inter in sample:
+        inter_inds.append(_map[target])
+        inter_val.append(inter)
+
+    ind_lt = torch.LongTensor([samples_inds, inter_inds])
+    val_ft = torch.FloatTensor(inter_val)
+
+    batch = torch.sparse.FloatTensor(ind_lt, val_ft, torch.Size([batch_size, self.vector_dim]))
+
+    return batch
+
 
 
 class SoftMarginLoss(nn.Module):
