@@ -1,5 +1,5 @@
 
-def compute_average_precision(preds, documents):
+def average_precision(preds, documents):
   num_correct_preds = 0
   average_precision = 0
   for k, pred in enumerate(preds):
@@ -12,7 +12,7 @@ def compute_average_precision(preds, documents):
 
   return average_precision
 
-def compute_recall(preds, documents, k):
+def recall(preds, documents, k):
   num_correct_preds = 0
   preds = preds[:k]
   for document in documents:
