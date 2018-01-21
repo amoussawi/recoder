@@ -16,6 +16,7 @@ class AutoEncoder(nn.Module):
       self._activation_type = [self._activation_type] * (len(layer_sizes) - 1)
 
     self._e_activation_type = self._activation_type
+    self.layer_sizes = layer_sizes
 
     self._d_activation_type = list(self._activation_type)
     self._d_activation_type.reverse()
