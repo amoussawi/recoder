@@ -31,10 +31,14 @@ class RecommendationDataset(Dataset):
     log.info('Loading dataset from: ' + str(self.data_file))
 
     _pd_dtype = {
-      self.user_col: self.user_dtype,
-      self.item_col: self.item_dtype,
       self.inter_col: self.inter_dtype,
     }
+
+    if self.user_dtype is not None:
+      _pd_dtype[self.user_col] = self.user_dtype
+
+    if self.item_dtype is not None:
+      _pd_dtype[self.item_col] = self.item_dtype
 
     self.data = pd.read_csv(self.data_file, dtype=_pd_dtype)
 
