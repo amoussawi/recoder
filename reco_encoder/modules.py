@@ -23,6 +23,10 @@ class AutoEncoderRecommender(object):
     if 'model' in self.params:
       self.__load_last_state(self.params['model'])
 
+    if self.mode == 'model':
+      self.__init_model()
+      return
+
     self.batch_size = self.params['batch_size']
     self.transform = self.params['transform'] if 'transform' in self.params else lambda x: x
     self.compute_weights = self.params['compute_weights'] if 'compute_weights' in self.params else lambda x: None
@@ -256,7 +260,7 @@ class AutoEncoderRecommender(object):
       transformed_target = self.transform(target)
 
       output = sparse_encoder(transformed_input)
-      
+
       weights = self.compute_weights(transformed_target, sparse_encoder.active_outputs.data)
       loss, num_ratings = self.compute_loss(output, transformed_target, weights)
       total_epoch_loss += loss.data[0]
