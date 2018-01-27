@@ -7,7 +7,8 @@ class RecommendationDataset(Dataset):
 
   def __init__(self, data_file, item_based=True, target_dataset=None,
                user_dtype=None, item_dtype=None, inter_dtype=np.int32,
-               user_col='user', item_col='item', inter_col='inter'):
+               user_col='user', item_col='item', inter_col='inter',
+               data_apply_fn=None):
 
     self.data_file = data_file
 
@@ -16,6 +17,7 @@ class RecommendationDataset(Dataset):
     self.user_dtype = user_dtype
     self.item_dtype = item_dtype
     self.inter_dtype = inter_dtype
+    self.data_apply_fn = data_apply_fn
 
     self.user_col = user_col
     self.item_col = item_col
@@ -42,11 +44,20 @@ class RecommendationDataset(Dataset):
 
     self.data = pd.read_csv(self.data_file, dtype=_pd_dtype)
 
+    if self.data_apply_fn is not None:
+      self.data = self.data_apply_fn(self.data)
+
     self.users = self.data[self.user_col].unique().tolist()
     self.items = self.data[self.item_col].unique().tolist()
 
     _grouped_data_df = self.data.groupby(by=self.index_col)
-    self.__groups = list(_grouped_data_df.groups.keys())
+
+    if self.target_dataset is None:
+      self.__groups = list(_grouped_data_df.groups.keys())
+    else:
+      _groups = list(_grouped_data_df.groups.keys())
+      # to avoid having groups not in the target dataset
+      self.__groups = list(np.intersect1d(_groups, self.target_dataset.__groups))
 
     self.__grouped_data = _grouped_data_df
 
