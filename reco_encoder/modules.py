@@ -84,8 +84,8 @@ class AutoEncoderRecommender(object):
     self.model_checkpoint = self.params['model_checkpoint'] if 'model_checkpoint' in self.params else 'model/'
     self.item_based = self.params['item_based']
 
-    self.users = list(set(self.train_dataset.users + self.eval_dataset.users))
-    self.items = list(set(self.train_dataset.items + self.eval_dataset.items))
+    self.users = list(set(self.train_dataset.users + self.eval_dataset.users + self.eval_dataset.target_dataset.users))
+    self.items = list(set(self.train_dataset.items + self.eval_dataset.items + self.eval_dataset.target_dataset.items))
 
     self.vector_dim = len(self.items) if self.item_based else len(self.users)
 
@@ -105,6 +105,8 @@ class AutoEncoderRecommender(object):
 
     self.train_dataloader = DataLoader(self.train_dataset, batch_size=self.batch_size,
                                        shuffle=True, collate_fn=self.collate_to_sparse_batch)
+    self.eval_dataloader = DataLoader(self.eval_dataset, batch_size=self.batch_size,
+                                      shuffle=True, collate_fn=self.collate_to_sparse_batch)
 
   def __init_evaluation(self):
     self.eval_dataset = self.params['eval_dataset'] # type: RecommendationDataset
@@ -139,18 +141,26 @@ class AutoEncoderRecommender(object):
     if not os.path.isfile(model_file):
       raise Exception('No state file found in {}'.format(model_file))
     self._model_last_state = torch.load(model_file)
+    self.item_based = self._model_last_state['item_based']
     self.user_id_map = self._model_last_state['user_id_map']
     self.item_id_map = self._model_last_state['item_id_map']
 
+
   def __build_user_map(self):
-    self.user_id_map = {}
-    for user_id, user in enumerate(self.users):
-      self.user_id_map[user] = user_id
+    if self._model_last_state is not None:
+      self.user_id_map = self._model_last_state['user_id_map']
+    else:
+      self.user_id_map = {}
+      for user_id, user in enumerate(self.users):
+        self.user_id_map[user] = user_id
 
   def __build_item_map(self):
-    self.item_id_map = {}
-    for item_id, item in enumerate(self.items):
-      self.item_id_map[item] = item_id
+    if self._model_last_state is not None:
+      self.item_id_map = self._model_last_state['item_id_map']
+    else:
+      self.item_id_map = {}
+      for item_id, item in enumerate(self.items):
+        self.item_id_map[item] = item_id
 
   def save_state(self):
     checkpoint_file = "{}reco_ae_epoch_{}.model".format(self.model_checkpoint, self.current_epoch)
@@ -215,10 +225,10 @@ class AutoEncoderRecommender(object):
 
         output = sparse_encoder(corrupted_input)
 
-        weights = self.compute_weights(transformed_target, sparse_encoder.active_inputs.data)
+        weights = self.compute_weights(transformed_target)
 
-        loss, num_ratings = self.compute_loss(output, transformed_target, weights)
-        loss = loss / num_ratings
+        loss, normalization = self.compute_loss(output, transformed_target, weights)
+        loss = loss / normalization
         loss.backward()
         self.optimizer.step()
         agg_loss += loss.data[0]
@@ -247,7 +257,7 @@ class AutoEncoderRecommender(object):
     log.info('Evaluation mode')
     self.autoencoder.eval()
 
-    total_num_ratings = 0.0
+    loss_normalization = 0.0
 
     total_epoch_loss = 0.0
 
@@ -261,14 +271,13 @@ class AutoEncoderRecommender(object):
 
       output = sparse_encoder(transformed_input)
 
-      weights = self.compute_weights(transformed_target, sparse_encoder.active_outputs.data)
-      loss, num_ratings = self.compute_loss(output, transformed_target, weights)
+      weights = self.compute_weights(transformed_target)
+      loss, normalization = self.compute_loss(output, transformed_target, weights)
       total_epoch_loss += loss.data[0]
-      total_num_ratings += num_ratings.data[0]
+      loss_normalization += normalization.data[0]
 
-    total_epoch_loss = total_epoch_loss / total_num_ratings
+    total_epoch_loss = total_epoch_loss / loss_normalization
 
-    log.info('Validation Number of ratings: {}'.format(total_num_ratings))
     log.info('Evaluation Loss: {}'.format(total_epoch_loss))
 
   def compute_loss(self, output, target, weights=None):
