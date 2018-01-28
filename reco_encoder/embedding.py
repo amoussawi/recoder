@@ -1,15 +1,15 @@
 import annoy as an
-from reco_encoder.modules import AutoEncoderRecommender
 import torch
+import glog as log
 
 class EmbeddingsIndex(object):
 
-  def __init__(self, model=None, index_file=None,
-               is_item_index=True, n_trees=10):
-    self.model = model # type: AutoEncoderRecommender
+  def __init__(self, embeddings=None, index_file=None,
+               id_map=None, n_trees=10):
+    self.embeddings = embeddings
     self.index_file = index_file
     self.n_trees = n_trees
-    self.is_item_index = is_item_index
+    self.id_map = id_map
 
   def build(self):
     self.__build_index()
@@ -18,44 +18,34 @@ class EmbeddingsIndex(object):
     self.__load_index()
 
   def __build_index(self):
-    num_layers = len(self.model.autoencoder.layer_sizes)
-    self.embedding_size = self.model.autoencoder.layer_sizes[-1]
+    self.embedding_size = self.embeddings.size(0)
 
     self.index = an.AnnoyIndex(self.embedding_size, metric='angular')
 
-    weights_v = list(self.model.autoencoder.parameters())[:num_layers-1]
-    weights = [w.data for w in weights_v]
-    weights.reverse()
-
-    embeddings = weights[0]
-    for w in weights[1:]:
-      embeddings = torch.matmul(embeddings, w)
-
-    for embedding_ind in range(embeddings.size(1)):
-      embedding = embeddings.index_select(1, torch.LongTensor([embedding_ind]))
+    for embedding_ind in range(self.embeddings.size(1)):
+      embedding = self.embeddings.index_select(1, torch.LongTensor([embedding_ind]))
       embedding_np = embedding.numpy()
       self.index.add_item(embedding_ind, embedding_np)
 
     self.index.build(self.n_trees)
 
-    self.id_map = self.model.item_id_map if self.is_item_index else self.model.user_id_map
     self.inverse_id_map = dict([(v,k) for k,v in self.id_map.items()])
 
     if self.index_file:
       embeddings_file = self.index_file + '.embeddings'
       state = {
         'embedding_size': self.embedding_size,
-        'is_item_index': self.is_item_index,
         'id_map': self.id_map,
         'embeddings_file': embeddings_file,
       }
+
       self.index.save(embeddings_file)
       torch.save(state, self.index_file)
 
   def __load_index(self):
+    log.info('Loading index file from {}'.format(self.index_file))
     state = torch.load(self.index_file)
     self.embedding_size = state['embedding_size']
-    self.is_item_index = state['is_item_index']
     self.id_map = state['id_map']
     embeddings_file = state['embeddings_file']
     self.index = an.AnnoyIndex(self.embedding_size, metric='angular')
