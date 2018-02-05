@@ -2,16 +2,16 @@ import os
 
 import glog as log
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torch.nn as nn
-from torch.optim.lr_scheduler import MultiStepLR
-
-from autoencoder.modules import AutoEncoder, SparseBatchAutoEncoder
 from torch.autograd import Variable
-
-from reco_encoder.data import RecommendationDataset
+from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
+
+from recoder.autoencoder.modules import AutoEncoder, SparseBatchAutoEncoder
+from recoder.data import RecommendationDataset
+
 
 class AutoEncoderRecommender(object):
 

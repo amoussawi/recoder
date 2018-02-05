@@ -1,10 +1,12 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.init as weight_init
-from torch.autograd import Variable
 import torch.sparse as sparse
-import numpy as np
-import autoencoder.functional as functional
+from torch.autograd import Variable
+
+import recoder.autoencoder.functional as functional
+
 
 class AutoEncoder(nn.Module):
   def __init__(self, layer_sizes, activation_type='selu', last_layer_act='none',
@@ -60,15 +62,15 @@ class AutoEncoder(nn.Module):
 
   def encode(self, x):
     return functional.encode(x, self.encode_w, self.encode_b,
-                  self._e_activation_type, dp_drop_prob=self._dp_drop_prob,
-                  training=self.training)
+                             self._e_activation_type, dp_drop_prob=self._dp_drop_prob,
+                             training=self.training)
 
   def decode(self, z):
     if self.is_constrained and self.training:
       self.update_constrained_decode_w()
     return functional.decode(z, self.decode_w, self.decode_b,
-                  self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
-                  training=self.training)
+                             self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
+                             training=self.training)
 
 
   def forward(self, x):
@@ -165,8 +167,8 @@ class SparseBatchAutoEncoder(nn.Module):
 
   def encode(self, x):
     return functional.encode(x, self.encode_w, self.encode_b,
-                  self._e_activation_type, dp_drop_prob=self._dp_drop_prob,
-                  training=self.training)
+                             self._e_activation_type, dp_drop_prob=self._dp_drop_prob,
+                             training=self.training)
 
   def decode(self, z):
     if self.is_constrained and self.training:
@@ -174,8 +176,8 @@ class SparseBatchAutoEncoder(nn.Module):
       self.__init_decode_w()
 
     return functional.decode(z, self.decode_w, self.decode_b,
-                  self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
-                  training=self.training)
+                             self._d_activation_type, dp_drop_prob=self._dp_drop_prob,
+                             training=self.training)
 
   def forward(self, x=None):
     if x is None:
