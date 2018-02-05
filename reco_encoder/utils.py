@@ -1,24 +1,37 @@
 
-def average_precision(preds, documents):
-  num_correct_preds = 0
+def average_precision(x, y, k):
+  tp = 0
+  y = set(y) if type(y) is not set else y
   average_precision = 0
-  for k, pred in enumerate(preds):
-    if pred in documents:
-      num_correct_preds += 1
-      prec_k = num_correct_preds / (k + 1)
-      average_precision += prec_k
+  average_precision_k = {}
 
-  average_precision /= len(documents)
+  for _k, _x in enumerate(x):
+    if _x in y:
+      tp += 1
+      delta_recall = 1.0
+    else:
+      delta_recall = 0
 
-  return average_precision
+    prec_k = tp / (_k + 1)
 
-def recall(preds, documents, k):
-  num_correct_preds = 0
-  preds = preds[:k]
-  for document in documents:
-    if document in preds:
-      num_correct_preds += 1
+    average_precision += prec_k * delta_recall
 
-  recall = num_correct_preds / len(documents)
+    if (_k + 1) in k:
+      average_precision_k[_k + 1] = average_precision / len(y)
 
-  return recall
+  return average_precision_k
+
+def recall(x, y, k):
+  tp = 0
+
+  y = set(y) if type(y) is not set else y
+  recall_k = {}
+
+  for _k, _x in enumerate(x):
+    if _x in y:
+      tp += 1
+
+    if (_k + 1) in k:
+      recall_k[_k + 1] = tp / len(y)
+
+  return recall_k
