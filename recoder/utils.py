@@ -83,3 +83,44 @@ def ndcg(x, y, k):
     ndcg_k[_k] = dcg_k[_k] / idcg_k[_k]
 
   return ndcg_k
+
+class MetricEvaluator(object):
+
+  def __init__(self, k, metrics=None):
+    self.k = k
+    self.metrics = metrics if metrics is not None else ['ap','recall','ndcg']
+
+    self._s_ap_k = dict([(_k, 0) for _k in k])
+    self._s_recall_k = dict([(_k, 0) for _k in k])
+    self._s_ndcg_k = dict([(_k, 0) for _k in k])
+
+    self.ap_k = dict([(_k, 0) for _k in k])
+    self.recall_k = dict([(_k, 0) for _k in k])
+    self.ndcg_k = dict([(_k, 0) for _k in k])
+
+    self.num_rec = 0
+
+  def evaluate(self, x, y):
+    self.num_rec += 1
+
+    ap_k = recall_k = ndcg_k = {}
+
+    if 'ap' in self.metrics:
+      ap_k = average_precision(x, y, self.k)
+      for _k in self.k:
+        self._s_ap_k[_k] += ap_k[_k]
+        self.ap_k[_k] = self._s_ap_k[_k] / self.num_rec
+
+    if 'recall' in self.metrics:
+      recall_k = recall(x, y, self.k)
+      for _k in self.k:
+        self._s_recall_k[_k] += recall_k[_k]
+        self.recall_k[_k] = self._s_recall_k[_k] / self.num_rec
+
+    if 'ndcg' in self.metrics:
+      ndcg_k = ndcg(x, y, self.k)
+      for _k in self.k:
+        self._s_ndcg_k[_k] += ndcg_k[_k]
+        self.ndcg_k[_k] = self._s_ndcg_k[_k] / self.num_rec
+
+    return {'ap': ap_k, 'recall': recall_k, 'ndcg': ndcg_k}
