@@ -25,17 +25,13 @@ class AutoEncoderRecommender(object):
 
     if self.mode == 'model':
       self.__init_model()
-      return
-
-    self.batch_size = self.params['batch_size']
-    self.transform = self.params['transform'] if 'transform' in self.params else lambda x: x
-    self.compute_weights = self.params['compute_weights'] if 'compute_weights' in self.params else lambda x: None
-
-    if mode == 'train':
+      self.autoencoder.eval()
+    elif mode == 'train':
       self.__init_training()
     elif mode == 'eval':
       self.__init_evaluation()
 
+    # deleting model state as it became useless
     del self._model_last_state
 
   def __init_model(self):
@@ -52,6 +48,9 @@ class AutoEncoderRecommender(object):
       self.last_layer_act = self._model_last_state['last_layer_act']
       self.is_constrained = self._model_last_state['is_constrained']
       self.dropout_prob = self._model_last_state['dropout_prob']
+      self.item_based = self._model_last_state['item_based']
+      self.user_id_map = self._model_last_state['user_id_map']
+      self.item_id_map = self._model_last_state['item_id_map']
 
     self.__create_model()
 
@@ -65,16 +64,20 @@ class AutoEncoderRecommender(object):
     if not self._model_last_state is None:
       self.autoencoder.load_state_dict(self._model_last_state['model'])
 
+  def __init_common_params(self):
+    self.loss_func = self.params['loss_func']
+    self.loss_func_type = self.loss_func.__class__.__name__
+    self.batch_size = self.params['batch_size']
+    self.compute_weights = self.params['compute_weights'] if 'compute_weights' in self.params else lambda x: None
 
   def __init_training(self):
     self.train_dataset = self.params['train_dataset'] # type: RecommendationDataset
     self.eval_dataset = self.params['eval_dataset'] # type: RecommendationDataset
+    self.__init_common_params()
     self.lr = self.params['lr']
     self.weight_decay = self.params['weight_decay']
     self.num_epochs = self.params['num_epochs']
     self.optimizer_type = self.params['optimizer_type']
-    self.loss_func = self.params['loss_func']
-    self.loss_func_type = self.loss_func.__class__.__name__
     self.summary_frequency = self.params['summary_frequency'] if 'summary_frequency' in self.params else 10
     self.eval_epoch_freq = self.params['eval_epoch_freq'] if 'eval_epoch_freq' in self.params else 5
     self.eval_itr_freq = self.params['eval_itr_freq'] if 'eval_itr_freq' in self.params else 0
@@ -110,9 +113,9 @@ class AutoEncoderRecommender(object):
 
   def __init_evaluation(self):
     self.eval_dataset = self.params['eval_dataset'] # type: RecommendationDataset
-    self.loss_func = self.params['loss_func']
-    self.loss_func_type = self.loss_func.__class__.__name__
+    self.__init_common_params()
     self.__init_model()
+
     self.eval_dataloader = DataLoader(self.eval_dataset, batch_size=self.batch_size,
                                       shuffle=True, collate_fn=self.collate_to_sparse_batch)
 
@@ -141,10 +144,6 @@ class AutoEncoderRecommender(object):
     if not os.path.isfile(model_file):
       raise Exception('No state file found in {}'.format(model_file))
     self._model_last_state = torch.load(model_file)
-    self.item_based = self._model_last_state['item_based']
-    self.user_id_map = self._model_last_state['user_id_map']
-    self.item_id_map = self._model_last_state['item_id_map']
-
 
   def __build_user_map(self):
     if self._model_last_state is not None:
