@@ -87,8 +87,9 @@ class AutoEncoderRecommender(object):
     self.model_checkpoint = self.params['model_checkpoint'] if 'model_checkpoint' in self.params else 'model/'
     self.item_based = self.params['item_based']
 
-    self.users = list(set(self.train_dataset.users + self.eval_dataset.users + self.eval_dataset.target_dataset.users))
-    self.items = list(set(self.train_dataset.items + self.eval_dataset.items + self.eval_dataset.target_dataset.items))
+    self.users = list(set(self.train_dataset.users + self.eval_dataset.users))
+
+    self.items = list(set(self.train_dataset.items + self.eval_dataset.items))
 
     self.vector_dim = len(self.items) if self.item_based else len(self.users)
 
@@ -214,19 +215,15 @@ class AutoEncoderRecommender(object):
         reduced_input = sparse_encoder.reduced_batch_in
         reduced_target = sparse_encoder.reduced_batch_out
 
-        transformed_input = self.transform(reduced_input)
-
-        corrupted_input = self.noise(transformed_input)
-
-        transformed_target = self.transform(reduced_target)
+        corrupted_input = self.noise(reduced_input)
 
         self.optimizer.zero_grad()
 
         output = sparse_encoder(corrupted_input)
 
-        weights = self.compute_weights(transformed_target)
+        weights = self.compute_weights(reduced_target)
 
-        loss, normalization = self.compute_loss(output, transformed_target, weights)
+        loss, normalization = self.compute_loss(output, reduced_target, weights)
         loss = loss / normalization
         loss.backward()
         self.optimizer.step()
@@ -265,13 +262,10 @@ class AutoEncoderRecommender(object):
       input = sparse_encoder.reduced_batch_in
       target = sparse_encoder.reduced_batch_out
 
-      transformed_input = self.transform(input)
-      transformed_target = self.transform(target)
+      output = sparse_encoder(input)
 
-      output = sparse_encoder(transformed_input)
-
-      weights = self.compute_weights(transformed_target)
-      loss, normalization = self.compute_loss(output, transformed_target, weights)
+      weights = self.compute_weights(target)
+      loss, normalization = self.compute_loss(output, target, weights)
       total_epoch_loss += loss.data[0]
       loss_normalization += normalization.data[0]
 

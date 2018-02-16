@@ -50,6 +50,10 @@ class RecommendationDataset(Dataset):
     self.users = self.data[self.user_col].unique().tolist()
     self.items = self.data[self.item_col].unique().tolist()
 
+    if self.target_dataset is not None:
+      self.users = list(set(self.users + self.target_dataset.users))
+      self.items = list(set(self.users + self.target_dataset.items))
+
     _grouped_data_df = self.data.groupby(by=self.index_col)
 
     if self.target_dataset is None:
