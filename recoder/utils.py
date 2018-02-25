@@ -1,10 +1,10 @@
 import numpy as np
 
-def average_precision(x, y, k):
+def average_precision(x, y, k, normalize=True):
   tp = 0
 
   k = [len(x)] + k
-  k = sorted(k)
+  k = sorted(list(set(k)))
 
   y = set(y) if type(y) is not set else y
   average_precision = 0
@@ -22,19 +22,22 @@ def average_precision(x, y, k):
     average_precision += prec_k * delta_recall
 
     if _k in k:
-      average_precision_k[_k] = average_precision / len(y)
+      average_precision_k[_k] = average_precision
 
   for ki, _k in enumerate(k):
     if _k not in average_precision_k:
       average_precision_k[_k] = average_precision_k[k[ki-1]]
 
+  for ki, _k in enumerate(k):
+    average_precision_k[_k] /= min(_k, len(y)) if normalize else _k
+
   return average_precision_k
 
-def recall(x, y, k):
+def recall(x, y, k, normalize=True):
   tp = 0
 
   k = [len(x)] + k
-  k = sorted(k)
+  k = sorted(list(set(k)))
 
   y = set(y) if type(y) is not set else y
   recall_k = {}
@@ -44,11 +47,14 @@ def recall(x, y, k):
       tp += 1
 
     if _k in k:
-      recall_k[_k] = tp / len(y)
+      recall_k[_k] = tp
 
   for ki, _k in enumerate(k):
     if _k not in recall_k:
       recall_k[_k] = recall_k[k[ki-1]]
+
+  for ki, _k in enumerate(k):
+    recall_k[_k] /= min(_k, len(y)) if normalize else _k
 
   return recall_k
 
@@ -56,7 +62,7 @@ def dcg(x, y, k):
   _dcg = 0.0
 
   k = [len(x)] + k
-  k = sorted(k)
+  k = sorted(list(set(k)))
 
   y = set(y) if type(y) is not set else y
   dcg_k = {}
@@ -86,9 +92,10 @@ def ndcg(x, y, k):
 
 class MetricEvaluator(object):
 
-  def __init__(self, k, metrics=None):
+  def __init__(self, k, metrics=None, normalize=True):
     self.k = k
     self.metrics = metrics if metrics is not None else ['ap','recall','ndcg']
+    self.normalize = normalize
 
     self._s_ap_k = dict([(_k, 0) for _k in k])
     self._s_recall_k = dict([(_k, 0) for _k in k])
@@ -106,13 +113,13 @@ class MetricEvaluator(object):
     ap_k = recall_k = ndcg_k = {}
 
     if 'ap' in self.metrics:
-      ap_k = average_precision(x, y, self.k)
+      ap_k = average_precision(x, y, self.k, normalize=self.normalize)
       for _k in self.k:
         self._s_ap_k[_k] += ap_k[_k]
         self.ap_k[_k] = self._s_ap_k[_k] / self.num_rec
 
     if 'recall' in self.metrics:
-      recall_k = recall(x, y, self.k)
+      recall_k = recall(x, y, self.k, normalize=self.normalize)
       for _k in self.k:
         self._s_recall_k[_k] += recall_k[_k]
         self.recall_k[_k] = self._s_recall_k[_k] / self.num_rec
