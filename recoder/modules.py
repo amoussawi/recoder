@@ -9,9 +9,8 @@ from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 
-from recoder.autoencoder.modules import AutoEncoder, SparseBatchAutoEncoder
 from recoder.data import RecommendationDataset
-
+from recoder.nn import SparseBatchAutoEncoder
 
 class AutoEncoderRecommender(object):
 
@@ -41,6 +40,7 @@ class AutoEncoderRecommender(object):
       self.last_layer_act = self.params['last_layer_act']
       self.is_constrained = self.params['is_constrained']
       self.dropout_prob = self.params['dropout_prob'] if 'dropout_prob' in self.params else 0
+      self.noise_prob = self.params['noise_prob'] if 'noise_prob' in self.params else 0
     else:
       self.vector_dim = self._model_last_state['vector_dim']
       self.hidden_layers_sizes = self._model_last_state['hidden_layers_sizes']
@@ -48,6 +48,7 @@ class AutoEncoderRecommender(object):
       self.last_layer_act = self._model_last_state['last_layer_act']
       self.is_constrained = self._model_last_state['is_constrained']
       self.dropout_prob = self._model_last_state['dropout_prob']
+      self.noise_prob = self._model_last_state['noise_prob']
       self.item_based = self._model_last_state['item_based']
       self.user_id_map = self._model_last_state['user_id_map']
       self.item_id_map = self._model_last_state['item_id_map']
@@ -55,11 +56,10 @@ class AutoEncoderRecommender(object):
     self.__create_model()
 
   def __create_model(self):
-    self.autoencoder = AutoEncoder(layer_sizes=[self.vector_dim] + [int(l) for l in self.hidden_layers_sizes],
-                                   activation_type=self.activation_type,
-                                   is_constrained=self.is_constrained,
-                                   dp_drop_prob=self.dropout_prob,
-                                   last_layer_act=self.last_layer_act)
+    self.autoencoder = SparseBatchAutoEncoder(layer_sizes=[self.vector_dim] + [int(l) for l in self.hidden_layers_sizes],
+                                              activation_type=self.activation_type, is_constrained=self.is_constrained,
+                                              dropout_prob=self.dropout_prob, last_layer_act=self.last_layer_act,
+                                              noise_prob=self.noise_prob)
 
     if not self._model_last_state is None:
       self.autoencoder.load_state_dict(self._model_last_state['model'])
@@ -173,6 +173,7 @@ class AutoEncoderRecommender(object):
       'last_layer_act': self.last_layer_act,
       'is_constrained': self.is_constrained,
       'dropout_prob': self.dropout_prob,
+      'noise_prob': self.noise_prob,
       'user_id_map': self.user_id_map,
       'item_id_map': self.item_id_map,
       'last_epoch': self.current_epoch,
@@ -210,20 +211,14 @@ class AutoEncoderRecommender(object):
       agg_loss = 0
       num_samples = 0
       for itr, (input, target) in enumerate(self.train_dataloader):
-        sparse_encoder = SparseBatchAutoEncoder(self.autoencoder, sparse_batch_in=input, sparse_batch_out=target)
-
-        reduced_input = sparse_encoder.reduced_batch_in
-        reduced_target = sparse_encoder.reduced_batch_out
-
-        corrupted_input = self.noise(reduced_input)
-
         self.optimizer.zero_grad()
 
-        output = sparse_encoder(corrupted_input)
+        output, reduced_target = self.autoencoder(input, target=target, full_output=False)
 
         weights = self.compute_weights(reduced_target)
 
         loss, normalization = self.compute_loss(output, reduced_target, weights)
+
         loss = loss / normalization
         loss.backward()
         self.optimizer.step()
@@ -258,11 +253,8 @@ class AutoEncoderRecommender(object):
     total_epoch_loss = 0.0
 
     for itr, (input, target) in enumerate(self.eval_dataloader):
-      sparse_encoder = SparseBatchAutoEncoder(self.autoencoder, sparse_batch_in=input, sparse_batch_out=target)
-      input = sparse_encoder.reduced_batch_in
-      target = sparse_encoder.reduced_batch_out
 
-      output = sparse_encoder(input)
+      output, target = self.autoencoder(input, target=target, full_output=False)
 
       weights = self.compute_weights(target)
       loss, normalization = self.compute_loss(output, target, weights)
@@ -315,6 +307,11 @@ class AutoEncoderRecommender(object):
 
     return batch
 
+  def infer(self, user_hist):
+    input, target = self.collate_to_sparse_batch([(user_hist, user_hist)])
+
+    output = self.autoencoder(input)
+    return output
 
 
 class SoftMarginLoss(nn.Module):

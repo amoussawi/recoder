@@ -20,7 +20,7 @@ class SimilarityRecommender(Recommender):
   def recommend(self, user_hist):
     user_items = list(zip(*user_hist))[0]
 
-    num_s = int(2 * self.num_recommendations / len(user_items))
+    num_s = max(int(2 * self.num_recommendations / len(user_items)), 2)
 
     items_pool = []
     for item_id in user_items:
@@ -58,22 +58,17 @@ class InferenceRecommender(Recommender):
     self.item_id_inverse_map = dict([(v,k) for k,v in model.item_id_map.items()])
 
   def recommend(self, user_hist):
-    input, target = self.model.collate_to_sparse_batch([(user_hist, user_hist)])
-    sparse_encoder = SparseBatchAutoEncoder(self.model.autoencoder, sparse_batch_in=input,
-                                            full_output=True)
-    reduced_input = sparse_encoder.reduced_batch_in
-
-    output = sparse_encoder(reduced_input)
-
+    output = self.model.infer(user_hist)
     output_np = output.data.numpy().reshape(-1)
 
-    top_k = heapq.nlargest(self.num_recommendations * 2, enumerate(output_np), key=lambda k: k[1])
+    top_k = heapq.nlargest(self.num_recommendations * 10, enumerate(output_np), key=lambda k: k[1])
+    listened_songs = list(list(zip(*user_hist))[0])
 
     recommendations = []
     for item_model_id, pred in top_k:
       if len(recommendations) == self.num_recommendations:
         break
-      if not item_model_id in sparse_encoder.active_inputs.data:
+      if not self.item_id_inverse_map[item_model_id] in listened_songs:
         recommendations.append(self.item_id_inverse_map[item_model_id])
 
     return recommendations
