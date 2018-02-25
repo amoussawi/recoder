@@ -52,7 +52,7 @@ class RecommendationDataset(Dataset):
 
     if self.target_dataset is not None:
       self.users = list(set(self.users + self.target_dataset.users))
-      self.items = list(set(self.users + self.target_dataset.items))
+      self.items = list(set(self.items + self.target_dataset.items))
 
     _grouped_data_df = self.data.groupby(by=self.index_col)
 
