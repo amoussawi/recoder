@@ -114,7 +114,7 @@ class SparseBatchAutoEncoder(nn.Module):
     dense_target = None
     out_active_embeddings = None
     if target is not None and full_output:
-      dense_target = target.to_dense()
+      dense_target = Variable(target.to_dense())
     elif target is not None:
       dense_target, out_active_embeddings = self.__generate_reduced_batch(target)
 
@@ -134,10 +134,7 @@ class SparseBatchAutoEncoder(nn.Module):
     for decoding_layer in self.decoding_layers:
       z = activation(decoding_layer(z), self.activation_type)
 
-    if not full_output:
-      z = self.__de_linear_embedding_layer(out_active_embeddings, z)
-    else:
-      z = self.__de_linear_embedding_layer(None, z)
+    z = self.__de_linear_embedding_layer(out_active_embeddings, z)
 
     z = activation(z, self.last_layer_act)
 
