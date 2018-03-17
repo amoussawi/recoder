@@ -45,19 +45,21 @@ class SparseBatchAutoEncoder(nn.Module):
   def __create_decoding_layers(self):
     _decoding_layers = self.__create_coding_layers(list(reversed(self.layer_sizes[1:])))
     if self.is_constrained:
-      # This way the decoding layers are not stored as submodules and not optimized
-      self.decoding_layers = _decoding_layers
+      for ind, decoding_layer in enumerate(_decoding_layers):
+        # Deleting layer weight to unregister it as a parameter
+        # Only register decoding layers biases as parameters
+        del decoding_layer.weight
 
-      # Only register decoding layers biases as parameters
-      for ind, decoding_layer in enumerate(self.decoding_layers):
-        self.register_parameter('decoding_layer_bias_' + str(ind), decoding_layer.bias)
-    else:
-      self.decoding_layers = nn.Sequential(*_decoding_layers)
+      # Reset the decoding layers weights as encoding layers weights tranpose
+      # These won't be registered as model parameters
+      for el, dl in zip(self.encoding_layers, reversed(_decoding_layers)):
+        dl.weight = el.weight.t()
 
-    if self.is_constrained:
       self.de_embedding_layer = self.en_embedding_layer
     else:
       self.de_embedding_layer = nn.Embedding(self.num_embeddings, self.embedding_size)
+
+    self.decoding_layers = nn.Sequential(*_decoding_layers)
 
     self.__de_linear_embedding_layer = LinearEmbedding(self.de_embedding_layer, input_based=False)
 
@@ -97,10 +99,11 @@ class SparseBatchAutoEncoder(nn.Module):
 
   def __tie_weights(self):
     for el, dl in zip(self.encoding_layers, reversed(self.decoding_layers)):
-      dl.weight = nn.Parameter(el.weight.data.t())
+      dl.weight = el.weight.t()
 
   def forward(self, input: torch.sparse.FloatTensor, target=None,
               full_output=True):
+
     assert full_output or (not full_output and target is not None)
 
     if self.is_constrained:
