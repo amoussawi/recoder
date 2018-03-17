@@ -121,22 +121,23 @@ class AutoEncoderRecommender(object):
                                       shuffle=True, collate_fn=self.collate_to_sparse_batch)
 
   def __init_optimizer(self):
+    params = []
+    for param_name, param in self.autoencoder.named_parameters():
+      weight_decay = self.weight_decay
+
+      if 'bias' in param_name:
+        weight_decay = 0
+
+      params.append({'params': param, 'weight_decay': weight_decay})
+
     if self.optimizer_type == "adam":
-      self.optimizer = optim.Adam(self.autoencoder.parameters(),
-                                  lr=self.lr,
-                                  weight_decay=self.weight_decay)
+      self.optimizer = optim.Adam(params, lr=self.lr)
     elif self.optimizer_type == "adagrad":
-      self.optimizer = optim.Adagrad(self.autoencoder.parameters(),
-                                     lr=self.lr,
-                                     weight_decay=self.weight_decay)
+      self.optimizer = optim.Adagrad(params, lr=self.lr)
     elif self.optimizer_type == "sgd":
-      self.optimizer = optim.SGD(self.autoencoder.parameters(),
-                                 lr=self.lr, momentum=0.9,
-                                 weight_decay=self.weight_decay)
+      self.optimizer = optim.SGD(params, lr=self.lr, momentum=0.9)
     elif self.optimizer_type == "rmsprop":
-      self.optimizer = optim.RMSprop(self.autoencoder.parameters(),
-                                     lr=self.lr, momentum=0.9,
-                                     weight_decay=self.weight_decay)
+      self.optimizer = optim.RMSprop(params, lr=self.lr, momentum=0.9)
     else:
       raise Exception('Unknown optimizer kind')
 
