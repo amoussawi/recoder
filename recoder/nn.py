@@ -118,7 +118,8 @@ class SparseBatchAutoEncoder(nn.Module):
     elif target is not None:
       dense_target, out_active_embeddings = self.__generate_reduced_batch(target)
 
-    z = reduced_input
+    # Normalize the input
+    z = F.normalize(reduced_input, p=2, dim=1)
     if self.noise_prob > 0.0:
       z = self.noise_layer(z)
 
