@@ -1,5 +1,3 @@
-from recoder.autoencoder.modules import SparseBatchAutoEncoder
-from recoder.modules import AutoEncoderRecommender
 from recoder.embedding import EmbeddingsIndex
 import heapq
 
@@ -11,16 +9,18 @@ class Recommender(object):
 class SimilarityRecommender(Recommender):
 
   def __init__(self, embeddings_index: EmbeddingsIndex,
-               num_recommendations, scale=1, search_k=10000):
+               num_recommendations, scale=1, search_k=10000,
+               pool_size=-1):
     self.embeddings_index = embeddings_index
     self.scale = scale
     self.num_recommendations = num_recommendations
     self.search_k = search_k
+    self.pool_size = pool_size if pool_size > 0 else self.num_recommendations
 
   def recommend(self, user_hist):
     user_items = list(zip(*user_hist))[0]
 
-    num_s = max(int(2 * self.num_recommendations / len(user_items)), 2)
+    num_s = int(self.pool_size / len(user_items))
 
     items_pool = []
     for item_id in user_items:
@@ -51,21 +51,22 @@ class SimilarityRecommender(Recommender):
 
 class InferenceRecommender(Recommender):
 
-  def __init__(self, model: AutoEncoderRecommender,
-               num_recommendations):
+  def __init__(self, model,
+               num_recommendations, pool_size=-1):
     self.model = model
     self.num_recommendations = num_recommendations
     self.item_id_inverse_map = dict([(v,k) for k,v in model.item_id_map.items()])
+    self.pool_size = pool_size if pool_size > 0 else self.num_recommendations
 
   def recommend(self, user_hist):
     output = self.model.infer(user_hist)
     output_np = output.data.numpy().reshape(-1)
 
-    top_k = heapq.nlargest(self.num_recommendations * 10, enumerate(output_np), key=lambda k: k[1])
+    items_pool = heapq.nlargest(min(self.pool_size, output_np.shape[0]), enumerate(output_np), key=lambda k: k[1])
     listened_songs = list(list(zip(*user_hist))[0])
 
     recommendations = []
-    for item_model_id, pred in top_k:
+    for item_model_id, pred in items_pool:
       if len(recommendations) == self.num_recommendations:
         break
       if not self.item_id_inverse_map[item_model_id] in listened_songs:
