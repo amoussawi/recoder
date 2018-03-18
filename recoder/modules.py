@@ -68,7 +68,6 @@ class AutoEncoderRecommender(object):
     self.loss_func = self.params['loss_func']
     self.loss_func_type = self.loss_func.__class__.__name__
     self.batch_size = self.params['batch_size']
-    self.compute_weights = self.params['compute_weights'] if 'compute_weights' in self.params else lambda x: None
 
   def __init_training(self):
     self.train_dataset = self.params['train_dataset'] # type: RecommendationDataset
@@ -208,7 +207,7 @@ class AutoEncoderRecommender(object):
       total_epoch_loss = 0.0
       num_batches = 0.0
       self.lr_scheduler.step()
-      log.info('Epoch Learning Rate: {}'.format(self.lr_scheduler.get_lr()))
+      log.info('Epoch Learning Rate: {}'.format(self.lr_scheduler.get_lr()[0]))
       agg_loss = 0
       num_samples = 0
       for itr, (input, target) in enumerate(self.train_dataloader):
@@ -216,11 +215,8 @@ class AutoEncoderRecommender(object):
 
         output, reduced_target = self.autoencoder(input, target=target, full_output=False)
 
-        weights = self.compute_weights(reduced_target)
+        loss = self.compute_loss(output, reduced_target)
 
-        loss, normalization = self.compute_loss(output, reduced_target, weights)
-
-        loss = loss / normalization
         loss.backward()
         self.optimizer.step()
         agg_loss += loss.data[0]
@@ -251,27 +247,26 @@ class AutoEncoderRecommender(object):
 
     loss_normalization = 0.0
 
-    total_epoch_loss = 0.0
+    total_loss = 0.0
 
     for itr, (input, target) in enumerate(self.eval_dataloader):
 
       output, target = self.autoencoder(input, target=target, full_output=False)
 
-      weights = self.compute_weights(target)
-      loss, normalization = self.compute_loss(output, target, weights)
-      total_epoch_loss += loss.data[0]
-      loss_normalization += normalization.data[0]
+      loss = self.compute_loss(output, target)
+      total_loss += loss.data[0]
 
-    total_epoch_loss = total_epoch_loss / loss_normalization
+    avg_loss = total_loss / itr
 
-    log.info('Evaluation Loss: {}'.format(total_epoch_loss))
+    log.info('Evaluation Loss: {}'.format(avg_loss))
 
-  def compute_loss(self, output, target, weights=None):
-    if weights is not None:
-      normalization = torch.sum(weights)
-    else:
-      normalization = Variable(torch.FloatTensor([1]))
-    return self.loss_func(output, target, weights), normalization
+  def compute_loss(self, output, target):
+    # Average loss over samples in a batch
+    normalization = Variable(torch.FloatTensor([target.size(0)]))
+    if self.use_cuda:
+      normalization = normalization.cuda()
+    loss = self.loss_func(output, target) / normalization
+    return loss
 
   def collate_to_sparse_batch(self, batch):
     _input_batch = [i for i, t in batch]
@@ -331,12 +326,18 @@ class SoftMarginLoss(nn.Module):
     return loss
 
 class MSELoss(nn.Module):
-  def __init__(self, size_average=True):
+
+  def __init__(self, confidence=0, size_average=True):
     super(MSELoss, self).__init__()
     self.size_average = size_average
+    self.confidence = confidence
 
-  def forward(self, input, target, weights=None):
-    if not weights is None:
-      input = input * weights.sqrt()
-      target = target * weights.sqrt()
-    return F.mse_loss(input, target, size_average=self.size_average)
+  def forward(self, input, target):
+    weights = 1 + self.confidence * (target > 0).float()
+    loss = F.mse_loss(input, target, reduce=False)
+    weighted_loss = weights * loss
+    if self.size_average:
+      return weighted_loss.mean()
+    else:
+      return weighted_loss.sum()
+
