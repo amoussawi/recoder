@@ -1,4 +1,8 @@
 import numpy as np
+import glog
+
+def get_param(params_dict, param, default=None):
+  return params_dict[param] if param in params_dict else default
 
 def average_precision(x, y, k, normalize=True):
   tp = 0
@@ -131,3 +135,16 @@ class MetricEvaluator(object):
         self.ndcg_k[_k] = self._s_ndcg_k[_k] / self.num_rec
 
     return {'ap': ap_k, 'recall': recall_k, 'ndcg': ndcg_k}
+
+  def summarize(self):
+    if 'ap' in self.metrics:
+      for _k in self.k:
+        glog.info('Mean AP@{}: {}'.format(_k, self.ap_k[_k]))
+
+    if 'recall' in self.metrics:
+      for _k in self.k:
+        glog.info('Mean Recall@{}: {}'.format(_k, self.recall_k[_k]))
+
+    if 'ndcg' in self.metrics:
+      for _k in self.k:
+        glog.info('Mean NDCG@{}: {}'.format(_k, self.ndcg_k[_k]))

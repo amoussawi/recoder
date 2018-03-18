@@ -1,122 +1,111 @@
 import os
 
 import glog as log
+
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 
+import numpy as np
+
 from recoder.data import RecommendationDataset
 from recoder.nn import SparseBatchAutoEncoder
+from recoder.recommender import InferenceRecommender
+from recoder.utils import MetricEvaluator
+import recoder.utils as utils
 
-class AutoEncoderRecommender(object):
+class Recoder(object):
+  def __init__(self, mode, model_file=None, model_params=None,
+               train_dataset=None, val_dataset=None, use_cuda=False,
+               optimizer_type='sgd', lr=0.001, weight_decay=0, num_epochs=1,
+               loss_module=None, batch_size=64, optimizer_lr_milestones=None,
+               apply_ns=True):
 
-  def __init__(self, mode, params):
-    self.params = params
     self.mode = mode
-    self._model_last_state = None
+    self.model_file = model_file
+    self.model_params = model_params
+    self.optimizer_type = optimizer_type
+    self.lr = lr
+    self.weight_decay = weight_decay
+    self.num_epochs = num_epochs
+    self.loss_module = loss_module
+    self.batch_size = batch_size
+    self.optimizer_lr_milestones = optimizer_lr_milestones if optimizer_lr_milestones else []
+    self.train_dataset = train_dataset # type: RecommendationDataset
+    self.val_dataset = val_dataset # type: RecommendationDataset
+    self.use_cuda = use_cuda
+    self.apply_ns = apply_ns
 
-    if 'model' in self.params:
-      self.__load_last_state(self.params['model'])
+    self.loss_module_name = self.loss_module.__class__.__name__
+
+    self._model_saved_state = None
+    self.user_id_map = None
+    self.item_id_map = None
+
+    if model_file is not None:
+      self.__init_from_model_file(self.model_file)
 
     if self.mode == 'model':
       self.__init_model()
-      self.autoencoder.eval()
     elif mode == 'train':
       self.__init_training()
-    elif mode == 'eval':
-      self.__init_evaluation()
+
+    # summarize model
+    log.info('{} mode'.format('GPU' if self.use_cuda else 'CPU'))
+    for param, val in self.model_params.items():
+      log.info('{}: {}'.format(param, val))
+    log.info('Input vector size: {}'.format(self.vector_dim))
 
     # deleting model state as it became useless
-    del self._model_last_state
+    del self._model_saved_state
 
   def __init_model(self):
-    if self._model_last_state is None:
-      self.hidden_layers_sizes = self.params['hidden_layers_sizes']
-      self.activation_type = self.params['activation_type']
-      self.last_layer_act = self.params['last_layer_act']
-      self.is_constrained = self.params['is_constrained']
-      self.dropout_prob = self.params['dropout_prob'] if 'dropout_prob' in self.params else 0
-      self.noise_prob = self.params['noise_prob'] if 'noise_prob' in self.params else 0
-    else:
-      self.vector_dim = self._model_last_state['vector_dim']
-      self.hidden_layers_sizes = self._model_last_state['hidden_layers_sizes']
-      self.activation_type = self._model_last_state['activation_type']
-      self.last_layer_act = self._model_last_state['last_layer_act']
-      self.is_constrained = self._model_last_state['is_constrained']
-      self.dropout_prob = self._model_last_state['dropout_prob']
-      self.noise_prob = self._model_last_state['noise_prob']
-      self.item_based = self._model_last_state['item_based']
-      self.user_id_map = self._model_last_state['user_id_map']
-      self.item_id_map = self._model_last_state['item_id_map']
+    _model_params = dict(self.model_params)
+    hidden_layers_sizes = list(_model_params['hidden_layers_sizes'])
+    del _model_params['hidden_layers_sizes']
+    layer_sizes = [self.vector_dim] + hidden_layers_sizes
 
-    self.__create_model()
+    self.autoencoder = SparseBatchAutoEncoder(layer_sizes=layer_sizes,
+                                              **_model_params)
 
-  def __create_model(self):
-    self.autoencoder = SparseBatchAutoEncoder(layer_sizes=[self.vector_dim] + [int(l) for l in self.hidden_layers_sizes],
-                                              activation_type=self.activation_type, is_constrained=self.is_constrained,
-                                              dropout_prob=self.dropout_prob, last_layer_act=self.last_layer_act,
-                                              noise_prob=self.noise_prob)
+    if not self._model_saved_state is None:
+      self.autoencoder.load_state_dict(self._model_saved_state['model'])
 
-    if not self._model_last_state is None:
-      self.autoencoder.load_state_dict(self._model_last_state['model'])
+    if self.use_cuda:
+      self.autoencoder.cuda()
 
-  def __init_common_params(self):
-    self.loss_func = self.params['loss_func']
-    self.loss_func_type = self.loss_func.__class__.__name__
-    self.batch_size = self.params['batch_size']
+    self.autoencoder.eval()
 
   def __init_training(self):
-    self.train_dataset = self.params['train_dataset'] # type: RecommendationDataset
-    self.eval_dataset = self.params['eval_dataset'] # type: RecommendationDataset
-    self.__init_common_params()
-    self.lr = self.params['lr']
-    self.weight_decay = self.params['weight_decay']
-    self.num_epochs = self.params['num_epochs']
-    self.optimizer_type = self.params['optimizer_type']
-    self.summary_frequency = self.params['summary_frequency'] if 'summary_frequency' in self.params else 10
-    self.eval_epoch_freq = self.params['eval_epoch_freq'] if 'eval_epoch_freq' in self.params else 5
-    self.eval_itr_freq = self.params['eval_itr_freq'] if 'eval_itr_freq' in self.params else 0
-    self.optimizer_milestones = self.params['optimizer_milestones'] if 'optimizer_milestones' in self.params else []
-    self.finetune = self.params['finetune'] if 'finetune' in self.params else False
-    self.noise = self.params['noise'] if 'noise' in self.params else lambda x: x
-    self.model_checkpoint = self.params['model_checkpoint'] if 'model_checkpoint' in self.params else 'model/'
-    self.item_based = self.params['item_based']
+    self.users = list(set(self.train_dataset.users + self.val_dataset.users))
+    self.items = list(set(self.train_dataset.items + self.val_dataset.items))
 
-    self.users = list(set(self.train_dataset.users + self.eval_dataset.users))
+    self.vector_dim = len(self.items)
 
-    self.items = list(set(self.train_dataset.items + self.eval_dataset.items))
+    if self.user_id_map is None:
+      self.__build_user_map()
 
-    self.vector_dim = len(self.items) if self.item_based else len(self.users)
-
-    self.__build_user_map()
-    self.__build_item_map()
+    if self.item_id_map is None:
+      self.__build_item_map()
 
     self.__init_model()
     self.__init_optimizer()
-    self.current_epoch = 0
 
-    if not self._model_last_state is None and not self.finetune:
-      self.optimizer.load_state_dict(self._model_last_state['optimizer'])
-      self.current_epoch = self._model_last_state['last_epoch'] + 1
+    self.current_epoch = 1
 
-    self.lr_scheduler = MultiStepLR(self.optimizer, milestones=self.optimizer_milestones,
-                                    gamma=0.1, last_epoch=self.current_epoch - 1)
+    if not self._model_saved_state is None:
+      self.current_epoch = self._model_saved_state['last_epoch'] + 1
+
+    _last_epoch = -1 if self.current_epoch == 1 else (self.current_epoch - 2)
+
+    self.lr_scheduler = MultiStepLR(self.optimizer, milestones=self.optimizer_lr_milestones,
+                                    gamma=0.1, last_epoch=_last_epoch)
 
     self.train_dataloader = DataLoader(self.train_dataset, batch_size=self.batch_size,
                                        shuffle=True, collate_fn=self.collate_to_sparse_batch)
-    self.eval_dataloader = DataLoader(self.eval_dataset, batch_size=self.batch_size,
-                                      shuffle=True, collate_fn=self.collate_to_sparse_batch)
-
-  def __init_evaluation(self):
-    self.eval_dataset = self.params['eval_dataset'] # type: RecommendationDataset
-    self.__init_common_params()
-    self.__init_model()
-
-    self.eval_dataloader = DataLoader(self.eval_dataset, batch_size=self.batch_size,
+    self.val_dataloader = DataLoader(self.val_dataset, batch_size=self.batch_size,
                                       shuffle=True, collate_fn=self.collate_to_sparse_batch)
 
   def __init_optimizer(self):
@@ -140,40 +129,38 @@ class AutoEncoderRecommender(object):
     else:
       raise Exception('Unknown optimizer kind')
 
-  def __load_last_state(self, model_file):
+    if not self._model_saved_state is None:
+      self.optimizer.load_state_dict(self._model_saved_state['optimizer'])
+
+  def __init_from_model_file(self, model_file):
     log.info('Loading model from: {}'.format(model_file))
     if not os.path.isfile(model_file):
       raise Exception('No state file found in {}'.format(model_file))
-    self._model_last_state = torch.load(model_file)
+    self._model_saved_state = torch.load(model_file)
+    self.model_params = self._model_saved_state['model_params']
+    self.item_id_map = self._model_saved_state['item_id_map']
+    self.user_id_map = self._model_saved_state['user_id_map']
+    self.current_epoch = self._model_saved_state['last_epoch']
+    self.model_state_dict = self._model_saved_state['model']
+    self.optimizer_state_dict = self._model_saved_state['optimizer']
+    self.vector_dim = self._model_saved_state['vector_dim']
 
   def __build_user_map(self):
-    if self._model_last_state is not None:
-      self.user_id_map = self._model_last_state['user_id_map']
-    else:
-      self.user_id_map = {}
-      for user_id, user in enumerate(self.users):
-        self.user_id_map[user] = user_id
+    self.user_id_map = {}
+    for user_id, user in enumerate(self.users):
+      self.user_id_map[user] = user_id
 
   def __build_item_map(self):
-    if self._model_last_state is not None:
-      self.item_id_map = self._model_last_state['item_id_map']
-    else:
-      self.item_id_map = {}
-      for item_id, item in enumerate(self.items):
-        self.item_id_map[item] = item_id
+    self.item_id_map = {}
+    for item_id, item in enumerate(self.items):
+      self.item_id_map[item] = item_id
 
-  def save_state(self):
-    checkpoint_file = "{}reco_ae_epoch_{}.model".format(self.model_checkpoint, self.current_epoch)
+  def save_state(self, model_checkpoint):
+    checkpoint_file = "{}_epoch_{}.model".format(model_checkpoint, self.current_epoch)
     log.info("Saving model to {}".format(checkpoint_file))
     current_state = {
-      'item_based': self.item_based,
       'vector_dim': self.vector_dim,
-      'hidden_layers_sizes': self.hidden_layers_sizes,
-      'activation_type': self.activation_type,
-      'last_layer_act': self.last_layer_act,
-      'is_constrained': self.is_constrained,
-      'dropout_prob': self.dropout_prob,
-      'noise_prob': self.noise_prob,
+      'model_params': self.model_params,
       'user_id_map': self.user_id_map,
       'item_id_map': self.item_id_map,
       'last_epoch': self.current_epoch,
@@ -182,90 +169,70 @@ class AutoEncoderRecommender(object):
     }
     torch.save(current_state, checkpoint_file)
 
-  def run(self):
-    log.info('Hidden layers sizes: {}'.format(self.hidden_layers_sizes))
-    log.info('Activation type: {}'.format(self.activation_type))
-    log.info('Vector dim: {}'.format(self.vector_dim))
-    if self.mode == 'train':
-      log.info('Learning rate: {}'.format(self.lr))
-      log.info('Weight decay: {}'.format(self.weight_decay))
-      log.info('Optimizer type: {}'.format(self.optimizer_type))
-      log.info('Loss function: {}'.format(self.loss_func_type))
-      log.info('Dropout probability: {}'.format(self.dropout_prob))
-      self.train()
-    elif self.mode == 'eval':
-      log.info('Loss function: {}'.format(self.loss_func_type))
-      self.eval()
+  def train(self, summary_frequency=0, val_epoch_freq=1,
+            model_checkpoint=None, checkpoint_freq=1, metric_eval_params=dict()):
+    log.info('Initial Learning Rate: {}'.format(self.lr))
+    log.info('Weight decay: {}'.format(self.weight_decay))
+    log.info('Batch Size: {}'.format(self.batch_size))
+    log.info('Optimizer: {}'.format(self.optimizer_type))
+    log.info('Loss Function: {}'.format(self.loss_module_name))
 
-  def train(self):
-    log.info('Training mode')
-
-    for epoch in range(self.current_epoch, self.num_epochs):
+    for epoch in range(self.current_epoch, self.num_epochs + 1):
       self.current_epoch = epoch
-      log.info('Doing epoch {} of {}'.format(epoch, self.num_epochs))
+      log.info('Epoch {}/{}'.format(epoch, self.num_epochs))
       self.autoencoder.train()
-      total_epoch_loss = 0.0
-      num_batches = 0.0
+      aggregated_losses = []
       self.lr_scheduler.step()
       log.info('Epoch Learning Rate: {}'.format(self.lr_scheduler.get_lr()[0]))
-      agg_loss = 0
-      num_samples = 0
       for itr, (input, target) in enumerate(self.train_dataloader):
         self.optimizer.zero_grad()
 
-        output, reduced_target = self.autoencoder(input, target=target, full_output=False)
+        output, reduced_target = self.autoencoder(input, target=target, full_output=not self.apply_ns)
 
         loss = self.compute_loss(output, reduced_target)
 
         loss.backward()
         self.optimizer.step()
-        agg_loss += loss.data[0]
-        num_samples += 1
+        aggregated_losses.append(loss.data[0])
 
-        if (itr + 1) % self.summary_frequency == 0:
-          log.info('[%d, %5d] %s: %.7f' % (epoch, itr + 1, self.loss_func_type, agg_loss / num_samples))
-          agg_loss = 0
-          num_samples = 0
+        if (itr + 1) % summary_frequency == 0:
+          log.info('[%d, %5d] %s: %.7f' % (epoch, itr + 1, self.loss_module_name, np.mean(aggregated_losses[-summary_frequency:])))
 
-        if (itr + 1) % self.eval_itr_freq == 0:
-          self.eval()
-          self.autoencoder.train()
+      log.info('Taining average {} loss: {}'.format(self.loss_module_name, 
+                                                    aggregated_losses.mean()))
 
-        total_epoch_loss += loss.data[0]
-        num_batches += 1
+      if epoch % val_epoch_freq == 0 or epoch == self.num_epochs:
+        self.validate()
+        self.evaluate(self.val_dataset, **metric_eval_params)
 
-      log.info('Total epoch {} finished training {} loss: {}'.format(epoch, self.loss_func_type,
-                                                                     total_epoch_loss / num_batches))
 
-      if epoch % self.eval_epoch_freq == 0 or epoch == self.num_epochs - 1:
-        self.eval()
-        self.save_state()
+      if model_checkpoint and (epoch % checkpoint_freq == 0 or epoch == self.num_epochs):
+        self.save_state(model_checkpoint)
 
-  def eval(self):
-    log.info('Evaluation mode')
+  def validate(self):
     self.autoencoder.eval()
 
-    loss_normalization = 0.0
-
     total_loss = 0.0
+    num_batches = 1
 
-    for itr, (input, target) in enumerate(self.eval_dataloader):
+    for itr, (input, target) in enumerate(self.val_dataloader):
 
-      output, target = self.autoencoder(input, target=target, full_output=False)
+      output, target = self.autoencoder(input, target=target, full_output=not self.apply_ns)
 
       loss = self.compute_loss(output, target)
       total_loss += loss.data[0]
+      num_batches = itr + 1
 
-    avg_loss = total_loss / itr
+    avg_loss = total_loss / num_batches
 
-    log.info('Evaluation Loss: {}'.format(avg_loss))
+    log.info('Validation Loss: {}'.format(avg_loss))
 
   def compute_loss(self, output, target):
     # Average loss over samples in a batch
     normalization = Variable(torch.FloatTensor([target.size(0)]))
     if self.use_cuda:
       normalization = normalization.cuda()
-    loss = self.loss_func(output, target) / normalization
+    loss = self.loss_module(output, target) / normalization
     return loss
 
   def collate_to_sparse_batch(self, batch):
@@ -287,7 +254,7 @@ class AutoEncoderRecommender(object):
     inter_val = []
     batch_size = len(batch)
 
-    _map = self.item_id_map if self.item_based else self.user_id_map
+    _map = self.item_id_map
 
     for sample_i, sample in enumerate(batch):
       num_values = len(sample)
@@ -297,7 +264,7 @@ class AutoEncoderRecommender(object):
         inter_val.append(inter)
 
     ind_lt = torch.LongTensor([samples_inds, inter_inds])
-    val_ft = torch.FloatTensor(inter_val)
+    val_ft = torch.FloatTensor(np.array(inter_val, dtype=np.float))
 
     batch = torch.sparse.FloatTensor(ind_lt, val_ft, torch.Size([batch_size, self.vector_dim]))
 
@@ -305,39 +272,36 @@ class AutoEncoderRecommender(object):
 
   def infer(self, user_hist):
     input, target = self.collate_to_sparse_batch([(user_hist, user_hist)])
-
-    output = self.autoencoder(input)
+    output = self.autoencoder(input).cpu()
     return output
 
+  def evaluate(self, eval_dataset, num_recommendations=100, pool_size=1000,
+               k=None, metrics=None):
+    self.autoencoder.eval()
+    val_dataloader = DataLoader(eval_dataset, batch_size=1, shuffle=True,
+                                collate_fn=lambda x: x)
 
-class SoftMarginLoss(nn.Module):
-  def __init__(self, size_average=True):
-    super(SoftMarginLoss, self).__init__()
-    self.size_average = size_average
+    k = [100] if k is None else k
+    metrics = ['ndcg'] if metrics is None else metrics
 
-  def forward(self, input, target, mask=None):
-    loss = (((- input * target).exp()) + 1).log()
-    if not mask is None:
-      loss = loss * mask
-    loss = loss.sum()
-    if self.size_average:
-      _num_elements = input.size()[0] * input.size()[1]
-      loss = loss / _num_elements
-    return loss
+    metric_evaluator = MetricEvaluator(k, metrics=metrics)
 
-class MSELoss(nn.Module):
+    num_preds = 0
 
-  def __init__(self, confidence=0, size_average=True):
-    super(MSELoss, self).__init__()
-    self.size_average = size_average
-    self.confidence = confidence
+    recommender = InferenceRecommender(self, num_recommendations,
+                                       pool_size=pool_size)
 
-  def forward(self, input, target):
-    weights = 1 + self.confidence * (target > 0).float()
-    loss = F.mse_loss(input, target, reduce=False)
-    weighted_loss = weights * loss
-    if self.size_average:
-      return weighted_loss.mean()
-    else:
-      return weighted_loss.sum()
+    for i, m_batch in enumerate(val_dataloader):
+      input, target = m_batch[0]
 
+      recommendations = recommender.recommend(input)
+
+      assert(len(recommendations)==len(set(recommendations)))
+
+      relevant_songs = list(zip(*target))[0]
+
+      metric_evaluator.evaluate(recommendations, relevant_songs)
+
+      num_preds += 1
+
+    metric_evaluator.summarize()

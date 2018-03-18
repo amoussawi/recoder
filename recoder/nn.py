@@ -185,3 +185,20 @@ class LinearEmbedding(nn.Module):
       return F.linear(y, _weight.t(), _bias)
     else:
       return F.linear(y, _weight, _bias)
+
+
+class MSELoss(nn.Module):
+
+  def __init__(self, confidence=0, size_average=True):
+    super(MSELoss, self).__init__()
+    self.size_average = size_average
+    self.confidence = confidence
+
+  def forward(self, input, target):
+    weights = 1 + self.confidence * (target > 0).float()
+    loss = F.mse_loss(input, target, reduce=False)
+    weighted_loss = weights * loss
+    if self.size_average:
+      return weighted_loss.mean()
+    else:
+      return weighted_loss.sum()
