@@ -202,3 +202,21 @@ class MSELoss(nn.Module):
       return weighted_loss.mean()
     else:
       return weighted_loss.sum()
+
+
+class MultinomialNLLLoss(nn.Module):
+
+  def __init__(self, size_average=True):
+    super(MultinomialNLLLoss, self).__init__()
+    self.size_average = size_average
+
+  def forward(self, input, target):
+    loss = - target * F.log_softmax(input, dim=1)
+    loss = loss.sum()
+
+    if self.size_average:
+      loss = loss.mean()
+    else:
+      loss = loss.sum()
+
+    return loss
