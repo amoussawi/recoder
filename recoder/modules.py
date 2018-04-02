@@ -270,10 +270,10 @@ class Recoder(object):
 
     return batch
 
-  def infer(self, user_hist):
-    input, target = self.collate_to_sparse_batch([(user_hist, user_hist)])
+  def infer(self, users_hist, return_input=False):
+    input, target = self.collate_to_sparse_batch(list(zip(users_hist, users_hist)))
     output = self.autoencoder(input).cpu()
-    return output
+    return output, input.to_dense() if return_input else output
 
   def evaluate(self, eval_dataset, num_recommendations=100, pool_size=1000,
                k=None, metrics=None):

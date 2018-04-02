@@ -1,9 +1,11 @@
 from recoder.embedding import EmbeddingsIndex
 import heapq
 
+import numpy as np
+
 class Recommender(object):
 
-  def recommend(self, user_hist):
+  def recommend(self, users_hist):
     raise NotImplementedError
 
 class SimilarityRecommender(Recommender):
@@ -49,27 +51,32 @@ class SimilarityRecommender(Recommender):
 
     return recommendations
 
+
 class InferenceRecommender(Recommender):
 
   def __init__(self, model,
-               num_recommendations, pool_size=-1):
+               num_recommendations):
     self.model = model
     self.num_recommendations = num_recommendations
     self.item_id_inverse_map = dict([(v,k) for k,v in model.item_id_map.items()])
-    self.pool_size = pool_size if pool_size > 0 else self.num_recommendations
 
-  def recommend(self, user_hist):
-    output = self.model.infer(user_hist)
-    output_np = output.data.numpy().reshape(-1)
+  def recommend(self, users_hist):
+    output, input = self.model.infer(users_hist, return_input=True)
+    input = input.numpy()
+    output = output.data.numpy()
 
-    items_pool = heapq.nlargest(min(self.pool_size, output_np.shape[0]), enumerate(output_np), key=lambda k: k[1])
-    listened_songs = list(list(zip(*user_hist))[0])
+    output[input > 0] = - np.inf
 
-    recommendations = []
-    for item_model_id, pred in items_pool:
-      if len(recommendations) == self.num_recommendations:
-        break
-      if not self.item_id_inverse_map[item_model_id] in listened_songs:
-        recommendations.append(self.item_id_inverse_map[item_model_id])
+    top_ind = np.argpartition(-output, self.num_recommendations, axis=1)
+    top_ind = top_ind[:, :self.num_recommendations]
+    top_output = output[np.arange(output.shape[0])[:, None], top_ind]
+
+    top_sorted_reset_ind = np.argsort(-top_output, axis=1)
+
+    top_sorted_ind = top_ind[np.arange(top_ind.shape[0])[:, None], top_sorted_reset_ind]
+
+    item_id_mapper = np.vectorize(lambda item_id: self.item_id_inverse_map[item_id])
+
+    recommendations = item_id_mapper(top_sorted_ind)
 
     return recommendations
