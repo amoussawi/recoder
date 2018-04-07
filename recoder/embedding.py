@@ -1,15 +1,36 @@
 import annoy as an
-import torch
+
+import pickle
+
 import glog as log
+
 
 class EmbeddingsIndex(object):
 
+  def get_embedding(self, embedding_id):
+    raise NotImplementedError
+
+  def get_nns_by_id(self, embedding_id, n):
+    raise NotImplementedError
+
+  def get_nns_by_embedding(self, embedding, n):
+    raise NotImplementedError
+
+  def get_similarity(self, id1, id2):
+    raise NotImplementedError
+
+
+class AnnoyEmbeddingsIndex(EmbeddingsIndex):
+
   def __init__(self, embeddings=None, index_file=None,
-               id_map=None, n_trees=10):
+               id_map=None, n_trees=10, search_k=-1,
+               include_distances=False):
     self.embeddings = embeddings
     self.index_file = index_file
     self.n_trees = n_trees
     self.id_map = id_map
+    self.search_k = search_k
+    self.include_distances = include_distances
 
   def build(self):
     self.__build_index()
@@ -18,14 +39,13 @@ class EmbeddingsIndex(object):
     self.__load_index()
 
   def __build_index(self):
-    self.embedding_size = self.embeddings.size(0)
+    self.embedding_size = self.embeddings.shape[1]
 
     self.index = an.AnnoyIndex(self.embedding_size, metric='angular')
 
-    for embedding_ind in range(self.embeddings.size(1)):
-      embedding = self.embeddings.index_select(1, torch.LongTensor([embedding_ind]))
-      embedding_np = embedding.numpy()
-      self.index.add_item(embedding_ind, embedding_np)
+    for embedding_ind in range(self.embeddings.shape[0]):
+      embedding = self.embeddings[embedding_ind, :]
+      self.index.add_item(embedding_ind, embedding)
 
     self.index.build(self.n_trees)
 
@@ -40,11 +60,12 @@ class EmbeddingsIndex(object):
       }
 
       self.index.save(embeddings_file)
-      torch.save(state, self.index_file)
+      with open(self.index_file) as _index_file:
+        pickle.dump(state, _index_file)
 
   def __load_index(self):
     log.info('Loading index file from {}'.format(self.index_file))
-    state = torch.load(self.index_file)
+    state = pickle.load(self.index_file)
     self.embedding_size = state['embedding_size']
     self.id_map = state['id_map']
     embeddings_file = state['embeddings_file']
@@ -52,18 +73,18 @@ class EmbeddingsIndex(object):
     self.index.load(embeddings_file)
     self.inverse_id_map = dict([(v,k) for k,v in self.id_map.items()])
 
-  def get_embedding(self, id):
-    return self.index.get_item_vector(self.id_map[id])
+  def get_embedding(self, embedding_id):
+    return self.index.get_item_vector(self.id_map[embedding_id])
 
-  def get_nns_by_id(self, id, n, search_k=-1, include_distances=False):
-    nearest_indices = self.index.get_nns_by_item(self.id_map[id], n, search_k=search_k,
-                                                 include_distances=include_distances)
+  def get_nns_by_id(self, embedding_id, n):
+    nearest_indices = self.index.get_nns_by_item(self.id_map[embedding_id], n, search_k=self.search_k,
+                                                 include_distances=self.include_distances)
     nearest_ids = [self.inverse_id_map[ind] for ind in nearest_indices]
     return nearest_ids
 
-  def get_nns_by_embedding(self, embedding, n, search_k=-1, include_distances=False):
-    nearest_indices = self.index.get_nns_by_vector(embedding, n, search_k=search_k,
-                                                   include_distances=include_distances)
+  def get_nns_by_embedding(self, embedding, n):
+    nearest_indices = self.index.get_nns_by_vector(embedding, n, search_k=self.search_k,
+                                                   include_distances=self.include_distances)
     nearest_ids = [self.inverse_id_map[ind] for ind in nearest_indices]
     return nearest_ids
 
@@ -72,3 +93,24 @@ class EmbeddingsIndex(object):
     cosine_similarity = 1 - (distance**2) / 2 # range from -1 to 1
     similarity = (cosine_similarity + 1) / 2 # range from 0 to 1
     return similarity
+
+
+class MemCacheEmbeddingsIndex(EmbeddingsIndex):
+
+  def __init__(self, embedding_index):
+    self.embedding_index = embedding_index # type: EmbeddingsIndex
+    self.__nns_cache = {}
+
+  def get_embedding(self, embedding_id):
+    return self.embedding_index.get_embedding(embedding_id)
+
+  def get_nns_by_embedding(self, embedding, n):
+    return self.embedding_index.get_nns_by_embedding(embedding, n)
+
+  def get_nns_by_id(self, embedding_id, n):
+    if embedding_id not in self.__nns_cache:
+      self.__nns_cache[embedding_id] = self.embedding_index.get_nns_by_id(embedding_id, n)
+    return self.__nns_cache[embedding_id]
+
+  def get_similarity(self, id1, id2):
+    return self.embedding_index.get_similarity(id1, id2)
