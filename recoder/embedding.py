@@ -60,12 +60,13 @@ class AnnoyEmbeddingsIndex(EmbeddingsIndex):
       }
 
       self.index.save(embeddings_file)
-      with open(self.index_file) as _index_file:
+      with open(self.index_file, 'wb') as _index_file:
         pickle.dump(state, _index_file)
 
   def __load_index(self):
     log.info('Loading index file from {}'.format(self.index_file))
-    state = pickle.load(self.index_file)
+    with open(self.index_file, 'rb') as _index_file:
+      state = pickle.load(_index_file)
     self.embedding_size = state['embedding_size']
     self.id_map = state['id_map']
     embeddings_file = state['embeddings_file']
