@@ -11,10 +11,10 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 from recoder.data import RecommendationDataset
+from recoder.metrics import RecommenderEvaluator
 from recoder.nn import SparseBatchAutoEncoder
 from recoder.recommender import InferenceRecommender
-from recoder.utils import MetricEvaluator
-import recoder.utils as utils
+
 
 class Recoder(object):
   def __init__(self, mode, model_file=None, model_params=None,
@@ -170,7 +170,9 @@ class Recoder(object):
     torch.save(current_state, checkpoint_file)
 
   def train(self, summary_frequency=0, val_epoch_freq=1,
-            model_checkpoint=None, checkpoint_freq=1, metric_eval_params=dict()):
+            model_checkpoint=None, checkpoint_freq=1,
+            eval_num_recommendations=None, metrics=None):
+
     log.info('Initial Learning Rate: {}'.format(self.lr))
     log.info('Weight decay: {}'.format(self.weight_decay))
     log.info('Batch Size: {}'.format(self.batch_size))
@@ -199,11 +201,13 @@ class Recoder(object):
           log.info('[%d, %5d] %s: %.7f' % (epoch, itr + 1, self.loss_module_name, np.mean(aggregated_losses[-summary_frequency:])))
 
       log.info('Taining average {} loss: {}'.format(self.loss_module_name, 
-                                                    aggregated_losses.mean()))
+                                                    np.mean(aggregated_losses)))
 
       if epoch % val_epoch_freq == 0 or epoch == self.num_epochs:
         self.validate()
-        self.evaluate(self.val_dataset, **metric_eval_params)
+        if metrics is not None and eval_num_recommendations is not None:
+          self.evaluate(self.val_dataset, num_recommendations=eval_num_recommendations,
+                        metrics=metrics, batch_size=self.batch_size)
 
 
       if model_checkpoint and (epoch % checkpoint_freq == 0 or epoch == self.num_epochs):
@@ -270,38 +274,18 @@ class Recoder(object):
 
     return batch
 
-  def infer(self, user_hist):
-    input, target = self.collate_to_sparse_batch([(user_hist, user_hist)])
+  def infer(self, users_hist, return_input=False):
+    input, target = self.collate_to_sparse_batch(list(zip(users_hist, users_hist)))
     output = self.autoencoder(input).cpu()
-    return output
+    return output, input.to_dense() if return_input else output
 
-  def evaluate(self, eval_dataset, num_recommendations=100, pool_size=1000,
-               k=None, metrics=None):
+  def evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
     self.autoencoder.eval()
-    val_dataloader = DataLoader(eval_dataset, batch_size=1, shuffle=True,
-                                collate_fn=lambda x: x)
+    recommender = InferenceRecommender(self, num_recommendations)
 
-    k = [100] if k is None else k
-    metrics = ['ndcg'] if metrics is None else metrics
+    evaluator = RecommenderEvaluator(recommender, metrics)
 
-    metric_evaluator = MetricEvaluator(k, metrics=metrics)
+    results = evaluator.evaluate(eval_dataset, batch_size=batch_size)
 
-    num_preds = 0
-
-    recommender = InferenceRecommender(self, num_recommendations,
-                                       pool_size=pool_size)
-
-    for i, m_batch in enumerate(val_dataloader):
-      input, target = m_batch[0]
-
-      recommendations = recommender.recommend(input)
-
-      assert(len(recommendations)==len(set(recommendations)))
-
-      relevant_songs = list(zip(*target))[0]
-
-      metric_evaluator.evaluate(recommendations, relevant_songs)
-
-      num_preds += 1
-
-    metric_evaluator.summarize()
+    for metric in results:
+      log.info('{}: {}'.format(metric, np.mean(results[metric])))

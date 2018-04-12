@@ -81,22 +81,23 @@ class SparseBatchAutoEncoder(nn.Module):
     if type(sparse_batch) is Variable:
       sparse_batch = sparse_batch.data
 
-    # Getting the active indices along dim 1
-    active_dim = sparse_batch._indices()[1]
-    active_dim = torch.from_numpy(np.unique(active_dim.numpy()))
-    active_dim_map = {}
-    for ind, inp in enumerate(active_dim):
-      active_dim_map[inp] = ind
+    indices = sparse_batch._indices()
 
-    reduced_batch_size = torch.Size([sparse_batch.size(0),active_dim.size(0)])
-    reduced_batch = torch.zeros(reduced_batch_size)
+    nonzero_inputs = indices[1]
+    nonzero_inputs = torch.from_numpy(np.unique(nonzero_inputs.numpy()))
+    batch_items_map = {}
+    for ind, inp in enumerate(nonzero_inputs):
+      batch_items_map[inp] = ind
 
-    # Fill the reduced batch with sparse batch values
-    _indices = sparse_batch._indices()
-    for i in range(_indices.size(1)):
-      reduced_batch[_indices[0][i]][active_dim_map[_indices[1][i]]] = sparse_batch._values()[i]
+    reduced_indices = torch.LongTensor(indices.size())
+    reduced_indices[0, :] = indices[0, :]
+    reduced_indices[1, :] = torch.LongTensor([batch_items_map[ind] for ind in indices[1, :]])
 
-    return Variable(reduced_batch), active_dim.long()
+    reduced_sparse_batch = torch.sparse.FloatTensor(reduced_indices, sparse_batch._values(),
+                                                    torch.Size([sparse_batch.size(0), len(nonzero_inputs)]))
+    reduced_batch = reduced_sparse_batch.to_dense()
+
+    return Variable(reduced_batch), nonzero_inputs.long()
 
   def __tie_weights(self):
     for el, dl in zip(self.encoding_layers, reversed(self.decoding_layers)):
