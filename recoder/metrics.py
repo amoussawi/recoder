@@ -13,7 +13,8 @@ def average_precision(x, y, k, normalize=True):
   precision = tp / (1 + np.arange(len(x)))  # precision at every position
   precision_drecall = np.multiply(precision, x_in_y)  # precision * delta_recall at every position
 
-  ap = precision_drecall.sum() / min(k, len(y)) if normalize else k
+  normalization = min(k, len(y)) if normalize else len(y)
+  ap = precision_drecall.sum() / normalization
 
   return ap
 
@@ -21,7 +22,8 @@ def average_precision(x, y, k, normalize=True):
 def recall(x, y, k, normalize=True):
   x = x[:k]
   x_in_y = np.isin(x, y, assume_unique=True).astype(np.int)
-  _recall = x_in_y.sum() / min(k, len(y)) if normalize else k
+  normalization = min(k, len(y)) if normalize else len(y)
+  _recall = x_in_y.sum() / normalization
 
   return _recall
 
