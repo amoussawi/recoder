@@ -136,7 +136,7 @@ class Recoder(object):
     log.info('Loading model from: {}'.format(model_file))
     if not os.path.isfile(model_file):
       raise Exception('No state file found in {}'.format(model_file))
-    self._model_saved_state = torch.load(model_file)
+    self._model_saved_state = torch.load(model_file, map_location='cpu')
     self.model_params = self._model_saved_state['model_params']
     self.item_id_map = self._model_saved_state['item_id_map']
     self.user_id_map = self._model_saved_state['user_id_map']
