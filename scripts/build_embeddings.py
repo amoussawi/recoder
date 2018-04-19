@@ -1,5 +1,5 @@
-from recoder.embedding import EmbeddingsIndex
-from recoder.modules import AutoEncoderRecommender
+from recoder.embedding import AnnoyEmbeddingsIndex
+from recoder.modules import Recoder
 import torch
 
 def build_embeddings_all_layers(model):
@@ -12,15 +12,15 @@ def build_embeddings_all_layers(model):
   for w in weights[1:]:
     embeddings = torch.matmul(embeddings, w)
 
-  return embeddings
+  return embeddings.numpy()
 
 def build_embeddings_first_layer(model):
-  return list(model.autoencoder.parameters())[0].data
+  return model.autoencoder.en_embedding_layer.weight.data
 
-model_file = ''
-model = AutoEncoderRecommender(mode='model',params={'model':model_file})
+model_file = 'models/ml-20m/bce_ns_d_0.0_n_0.5_200_epoch_100.model'
+model = Recoder(mode='model', model_file=model_file)
 
-index = EmbeddingsIndex(embeddings=build_embeddings_first_layer(model),
-                        index_file=model_file+'.index', id_map=model.item_id_map)
+index = AnnoyEmbeddingsIndex(embeddings=build_embeddings_first_layer(model),
+                             index_file=model_file+'.index', id_map=model.item_id_map)
 
 index.build()
