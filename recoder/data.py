@@ -1,7 +1,15 @@
-import pandas as pd
 from torch.utils.data import Dataset
+
 import numpy as np
-import glog as log
+
+import collections
+
+
+__Interaction = collections.namedtuple('__Interaction', ['item_id', 'inter'])
+
+class Interaction(__Interaction):
+  pass
+
 
 class RecommendationDataset(Dataset):
 
@@ -46,13 +54,17 @@ class RecommendationDataset(Dataset):
     _group = self.__groups[index]
     _data = self.__grouped_data.get_group(_group)
 
-    _pairs = list(zip(_data[self.target_col], _data[self.inter_col]))
+    interactions = []
+    for item_id, inter in zip(_data[self.target_col], _data[self.inter_col]):
+      interactions.append(Interaction(item_id=item_id, inter=inter))
 
     if self.target_dataset is None:
       _target_data = _data
-      _target_pairs = _pairs
+      target_interactions = interactions
     else:
       _target_data = self.target_dataset.__grouped_data.get_group(_group)
-      _target_pairs = list(zip(_target_data[self.target_col], _target_data[self.inter_col]))
+      target_interactions = []
+      for item_id, inter in zip(_target_data[self.target_col], _target_data[self.inter_col]):
+        target_interactions.append(Interaction(item_id=item_id, inter=inter))
 
-    return _pairs, _target_pairs
+    return interactions, target_interactions
