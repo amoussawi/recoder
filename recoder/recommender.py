@@ -75,7 +75,7 @@ class InferenceRecommender(Recommender):
     self.item_id_inverse_map = dict([(v,k) for k,v in model.item_id_map.items()])
 
   def recommend(self, users_hist):
-    output, input = self.model.infer(users_hist, return_input=True)
+    output, input = self.model.predict(users_hist, return_input=True)
     input = input.numpy()
     output = output.data.numpy()
 

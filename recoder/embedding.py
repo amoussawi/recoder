@@ -49,6 +49,9 @@ class AnnoyEmbeddingsIndex(EmbeddingsIndex):
 
     self.index.build(self.n_trees)
 
+    if self.id_map is None:
+      self.id_map = dict([(i, i) for i in range(self.embeddings.shape[0])])
+
     self.inverse_id_map = dict([(v,k) for k,v in self.id_map.items()])
 
     if self.index_file:
@@ -56,7 +59,6 @@ class AnnoyEmbeddingsIndex(EmbeddingsIndex):
       state = {
         'embedding_size': self.embedding_size,
         'id_map': self.id_map,
-        'embeddings_file': embeddings_file,
       }
 
       self.index.save(embeddings_file)
@@ -69,7 +71,7 @@ class AnnoyEmbeddingsIndex(EmbeddingsIndex):
       state = pickle.load(_index_file)
     self.embedding_size = state['embedding_size']
     self.id_map = state['id_map']
-    embeddings_file = state['embeddings_file']
+    embeddings_file = self.index_file + '.embeddings'
     self.index = an.AnnoyIndex(self.embedding_size, metric='angular')
     self.index.load(embeddings_file)
     self.inverse_id_map = dict([(v,k) for k,v in self.id_map.items()])

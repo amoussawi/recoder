@@ -17,7 +17,8 @@ from recoder.recommender import InferenceRecommender
 
 
 class Recoder(object):
-  def __init__(self, mode, model_file=None, model_params=None,
+
+  def __init__(self, mode, model_file=None, hidden_layers=None, model_params=None,
                train_dataset=None, val_dataset=None, use_cuda=False,
                optimizer_type='sgd', lr=0.001, weight_decay=0, num_epochs=1,
                loss_module=None, batch_size=64, optimizer_lr_milestones=None,
@@ -25,7 +26,8 @@ class Recoder(object):
 
     self.mode = mode
     self.model_file = model_file
-    self.model_params = model_params
+    self.hidden_layers = hidden_layers
+    self.model_params = model_params if model_params else {}
     self.optimizer_type = optimizer_type
     self.lr = lr
     self.weight_decay = weight_decay
@@ -62,13 +64,10 @@ class Recoder(object):
     del self._model_saved_state
 
   def __init_model(self):
-    _model_params = dict(self.model_params)
-    hidden_layers_sizes = list(_model_params['hidden_layers_sizes'])
-    del _model_params['hidden_layers_sizes']
-    layer_sizes = [self.vector_dim] + hidden_layers_sizes
+    layer_sizes = [self.vector_dim] + self.hidden_layers
 
     self.autoencoder = SparseBatchAutoEncoder(layer_sizes=layer_sizes,
-                                              **_model_params)
+                                              **self.model_params)
 
     if not self._model_saved_state is None:
       self.autoencoder.load_state_dict(self._model_saved_state['model'])
@@ -274,7 +273,7 @@ class Recoder(object):
 
     return batch
 
-  def infer(self, users_hist, return_input=False):
+  def predict(self, users_hist, return_input=False):
     input, target = self.collate_to_sparse_batch(list(zip(users_hist, users_hist)))
     output = self.autoencoder(input).cpu()
     return output, input.to_dense() if return_input else output

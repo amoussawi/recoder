@@ -13,7 +13,7 @@ class Interaction(__Interaction):
 
 class RecommendationDataset(Dataset):
 
-  def __init__(self, data=None, target_dataset=None,
+  def __init__(self, data, target_dataset=None,
                user_col='user', item_col='item', inter_col='inter'):
 
     self.data = data
