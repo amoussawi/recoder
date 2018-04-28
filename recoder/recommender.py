@@ -10,9 +10,37 @@ from sklearn.metrics.pairwise import cosine_similarity
 class Recommender(object):
 
   def recommend(self, users_hist):
+    """
+    Recommends a list of items for each user list of ``Interaction``.
+
+    Args:
+       users_hist (list): list of users list of ``Interaction`` .
+
+    Returns:
+      list: items recommended for each user
+
+    """
     raise NotImplementedError
 
 class SimilarityRecommender(Recommender):
+  """
+  Recommends items based on similarity search of the items in the user list
+  of ``Interaction``.
+
+  Implementation based on [1].
+
+  Args:
+    embeddings_index (EmbeddingsIndex): the embeddings index used to fetch embeddings and do nearest
+      neighbor search.
+    num_recommendations (int): number of recommendations to generate for each user.
+      not necessarily satisfied.
+    n (int, optional): number of similar items to retrieve for every item in user interactions.
+    scale (int, optional): how much to scale the similarity between two items
+
+  [1]: Fabio Aiolli. 2013. Efficient top-n recommendation for very large scale binary rated datasets.
+    In Proceedings of the 7th ACM conference on Recommender systems (RecSys '13).
+    ACM, New York, NY, USA, 273-280. DOI=http://dx.doi.org/10.1145/2507157.2507189
+  """
 
   def __init__(self, embeddings_index: EmbeddingsIndex,
                num_recommendations, n=1, scale=1):
@@ -67,7 +95,13 @@ class SimilarityRecommender(Recommender):
 
 
 class InferenceRecommender(Recommender):
+  """
+  Recommends items based on the predictions by a ``Recoder`` model
 
+  Args:
+    model (Recoder): model used to predict recommendations
+    num_recommendations (int): number of recommendations to generate for each user.
+  """
   def __init__(self, model,
                num_recommendations):
     self.model = model

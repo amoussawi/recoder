@@ -45,7 +45,13 @@ def ndcg(x, y, k):
 
 
 class Metric(object):
+  """
+  A Base class for metrics. All metrics should implement the evaluate function.
 
+  Args:
+    metric_name (str): metric name. useful for representing it as string
+      (printing) and hashing.
+  """
   def __init__(self, metric_name):
     self.metric_name = metric_name
 
@@ -56,10 +62,29 @@ class Metric(object):
     return self.metric_name.__hash__()
 
   def evaluate(self, x, y):
+    """
+    Evaluates the recommendations with respect to the items the user interacted with.
+
+    Args:
+      x (list): items recommended for the user
+      y (list): items the user interacted with
+
+    Returns:
+      float: metric value
+    """
     raise NotImplementedError
 
 
 class AveragePrecision(Metric):
+  """
+  Computes the average precision @ K of the recommended items.
+
+  Args:
+    k (int): the cut position of the recommended list
+    normalize (bool, optional): if True, normalize the value to 1 (divide by k)
+      if k is less than the number of items the user interacted with, otherwise normalize
+      only by number of items the user interacted with.
+  """
 
   def __init__(self, k, normalize=True):
     super().__init__(metric_name='AveragePrecision@{}'.format(k))
@@ -71,6 +96,15 @@ class AveragePrecision(Metric):
 
 
 class Recall(Metric):
+  """
+  Computes the recall @ K of the recommended items.
+
+  Args:
+    k (int): the cut position of the recommended list
+    normalize (bool, optional): if True, normalize the value to 1 (divide by k)
+      if k is less than the number of items in the user interactions, otherwise normalize
+      only by number of items in the user interactions.
+  """
 
   def __init__(self, k, normalize=True):
     super().__init__(metric_name='Recall@{}'.format(k))
@@ -82,6 +116,12 @@ class Recall(Metric):
 
 
 class NDCG(Metric):
+  """
+  Computes the normalized discounted cumulative gain @ K of the recommended items.
+
+  Args:
+    k (int): the cut position of the recommended list
+  """
 
   def __init__(self, k):
     super().__init__(metric_name='NDCG@{}'.format(k))
@@ -92,12 +132,31 @@ class NDCG(Metric):
 
 
 class RecommenderEvaluator(object):
+  """
+  Evaluates a ``Recommender`` given a set of ``Metric``
+
+  Args:
+    recommender (Recommender): the Recommender to evaluate
+    metrics (list): list of metrics used to evaluate the recommender
+  """
 
   def __init__(self, recommender, metrics):
     self.recommender = recommender
     self.metrics = metrics
 
   def evaluate(self, eval_dataset, batch_size=1):
+    """
+    Evaluates the recommender with an evaluation dataset.
+
+    Args:
+      eval_dataset (RecommendationDataset): the dataset to use
+        in evaluating the model
+      batch_size (int): the size of the users batch passed to the recommender
+
+    Returns:
+      dict: A dict mapping each metric to its mean value evaluated on
+        each user recommendations
+    """
     dataloader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=True,
                                 collate_fn=lambda _: _)
 

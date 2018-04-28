@@ -6,21 +6,60 @@ import glog as log
 
 
 class EmbeddingsIndex(object):
+  """
+  An abstract Embeddings Index from which to fetch embeddings and
+  execute nearest neighbor search on the items represented by the embeddings
+
+  All ``EmbeddingsIndex`` should implement this interface.
+  """
 
   def get_embedding(self, embedding_id):
+    """
+    Returns the embedding of the item ``embedding_id``
+    """
     raise NotImplementedError
 
   def get_nns_by_id(self, embedding_id, n):
+    """
+    Returns the ``n`` nearest neighbors of the ``embedding_id``
+    """
     raise NotImplementedError
 
   def get_nns_by_embedding(self, embedding, n):
+    """
+    Returns the ``n`` nearest neighbors of the ``embedding``
+    """
     raise NotImplementedError
 
   def get_similarity(self, id1, id2):
+    """
+    Returns the similarity between item ``id1`` and item ``id2``
+    """
     raise NotImplementedError
 
 
 class AnnoyEmbeddingsIndex(EmbeddingsIndex):
+  """
+  An ``EmbeddingsIndex`` based on ``AnnoyIndex`` [1] to efficiently execute nearest neighbors
+  search with trade off in accuracy.
+
+  The similarity between items is the cosine similarity.
+
+  Args:
+    embeddings (numpy.array, optional): the matrix that holds the embeddings of shape
+      (number of items * embedding size). Required to build the index.
+    index_file (str, optional): the index state file which is used to load or save the state of the
+      this index. Note: The annoy index file is stored in a separate file, which should be
+      in the same directory as index_file.
+    id_map (dict, optional): A dict that maps the items original ids to the indices of the embeddings.
+      Useful to fetch and do nearest neighbor search on the original items ids. If not provided,
+      it will simply be an identity map.
+    n_trees (int, optional): n_trees parameter used to build AnnoyIndex.
+    search_k (int, optional): search_k parameter used to search the AnnoyIndex for nearest items.
+    include_distances (bool, optional): include distances in the result returned on nearest search
+
+  [1]: https://github.com/spotify/annoy
+  """
 
   def __init__(self, embeddings=None, index_file=None,
                id_map=None, n_trees=10, search_k=-1,
@@ -99,6 +138,13 @@ class AnnoyEmbeddingsIndex(EmbeddingsIndex):
 
 
 class MemCacheEmbeddingsIndex(EmbeddingsIndex):
+  """
+  Caches ``EmbeddingsIndex`` nearest neighbor search results for each item in memory to reduce
+  computations.
+
+  Args:
+    embedding_index (EmbeddingsIndex): the EmbeddingsIndex to hit on cache misses.
+  """
 
   def __init__(self, embedding_index):
     self.embedding_index = embedding_index # type: EmbeddingsIndex

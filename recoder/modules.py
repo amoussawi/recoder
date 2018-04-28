@@ -17,6 +17,28 @@ from recoder.recommender import InferenceRecommender
 
 
 class Recoder(object):
+  """
+  Module to train/evaluate a recommendation AutoEncoder-based model
+
+  Args:
+    mode (str): the mode of the model, either 'train' or 'model'. 'model' only used when loading a
+      pre-trained model.
+    model_file (str, optional): the model file. required in 'model' model. and used to continue training
+      in 'train' mode.
+    hidden_layers (list, optional): AutoEncoder hidden layers sizes. required in 'train' mode.
+    model_params (str, optional): the AutoEncoder model extra parameters other than layer_sizes.
+    train_dataset (RecommendationDataset, optional): train dataset. required in 'train' mode.
+    val_dataset (RecommendationDataset, optional): validation dataset. required in 'train' mode.
+    use_cuda (bool, optional): use GPU on training/evaluation the model.
+    optimizer_type (str, optional): optimizer type (one of 'sgd', 'adam', 'adagrad', 'rmsprop').
+    lr (float, optional): learning rate.
+    weight_decay (float, optional): weight decay (L2 normalization).
+    num_epochs (int, optional): number of epochs to train the model
+    loss_module (Module, optional): loss module used to train the model. required on 'train' mode.
+    batch_size (int, optional): batch size
+    optimizer_lr_milestones (int, optional): optimizer learning rate epochs milestones (0.1 decay).
+    apply_ns (bool, optional): whether to sample negative items on the output layer
+  """
 
   def __init__(self, mode, model_file=None, hidden_layers=None, model_params=None,
                train_dataset=None, val_dataset=None, use_cuda=False,
@@ -171,6 +193,18 @@ class Recoder(object):
   def train(self, summary_frequency=0, val_epoch_freq=1,
             model_checkpoint=None, checkpoint_freq=1,
             eval_num_recommendations=None, metrics=None):
+    """
+    Train the model
+
+    Args:
+      summary_frequency (int, optional): batches iterations frequency of averaging loss
+        and logging it
+      val_epoch_freq (int, optional): epochs frequency of doing a validation pass
+      model_checkpoint (str, optional): file where to save the model
+      checkpoint_freq (int, optional): epochs frequency of saving a checkpoint the model
+      eval_num_recommendations (int, optional): num of recommendations to generate on validation
+      metrics (list, optional): list of ``Metric`` used to evaluate the model
+    """
 
     log.info('Initial Learning Rate: {}'.format(self.lr))
     log.info('Weight decay: {}'.format(self.weight_decay))
@@ -239,6 +273,17 @@ class Recoder(object):
     return loss
 
   def collate_to_sparse_batch(self, batch):
+    """
+    Collates a batch of users input and target list of ``Interaction`` into
+    a tuple of ``torch.sparse.FloatTensor`` matrices
+
+    Args:
+      batch (list): each sample is a tuple containing an input and a target
+        list of ``Interaction``.
+
+    Returns:
+      tuple: tuple of sparse input tensor and a sparse target tensor
+    """
     _input_batch = [i for i, t in batch]
     _target_batch = [t for d, t in batch]
 
@@ -279,6 +324,16 @@ class Recoder(object):
     return output, input.to_dense() if return_input else output
 
   def evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
+    """
+    Evaluates the current model given an evaluation dataset.
+
+    Args:
+      eval_dataset (RecommendationDataset): evaluation dataset
+      num_recommendations (int): number of top recommendations to consider.
+      metrics (list): list of ``Metric`` to use for evaluation.
+      batch_size (int, optional): batch size of computations.
+    """
+
     self.autoencoder.eval()
     recommender = InferenceRecommender(self, num_recommendations)
 

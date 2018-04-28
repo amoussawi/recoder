@@ -1,11 +1,65 @@
 import torch
 from torch import nn
-from recoder.functional import activation
 from torch.autograd import Variable
 import torch.nn.functional as F
+
+from recoder.functional import activation
+
 import numpy as np
 
 class SparseBatchAutoEncoder(nn.Module):
+  """
+  An AutoEncoder module that processes sparse tensors efficiently for training.
+
+  This module accepts as input a sparse tensor of shape (N, M), where N = mini-batch size,
+  and M = input vector size. It will reshape and densify the sparse tensor to only use the
+  columns that are non-zero.
+
+  The efficiency of the model comes while training. A target sparse tensor can be passed, which will also
+  be reshaped and densified, similar to the input, and returned as a dense tensor to be used
+  with the output in the loss function. The columns of the target tensor that are non-zero are
+  used to select which output units are necessary to compute for that batch. This can be done by setting
+  full_output to False. This is useful when it's not necessary to reconstruct the zeros (explicit feedback)
+  or when negative sampling on the zero output units is needed as the case in implicit feedback
+  recommendations.
+
+  Setting full_output to True will simply return a target.to_dense() and having the whole
+  output units computed.
+
+  Args:
+    layer_sizes (list): autoencoder layer sizes. only input and encoder layers.
+    activation_type (str, optional): activation function to use for hidden layers.
+      all activations in torch.nn.functional are supported
+    last_layer_act (str, optional): output layer activation function.
+    is_constrained (bool, optional): constraining model by using the encoder weights in the
+      decoder (tying the weights).
+    dropout_prob (float, optional): dropout probability at the bottleneck layer
+    noise_prob (float, optional): dropout (noise) probability at the input layer
+
+  Examples::
+
+    >>>> autoencoder = SparseBatchAutoEncoder([500,100])
+    >>>> batch_size = 32
+    >>>> i = torch.LongTensor([np.arange(45) % batch_size, np.arange(45)])
+    >>>> v = torch.FloatTensor(np.ones(45))
+    >>>> sparse_tensor = torch.sparse.FloatTensor(i, v, torch.Size([32,500]))
+    >>>> dense_output = autoencoder(sparse_tensor)
+    >>>> dense_output
+       0.0850  0.9490  ...   0.2430  0.5323
+       0.3519  0.4816  ...   0.9483  0.2497
+            ...         ⋱         ...
+       0.8744  0.8194  ...   0.5755  0.2090
+       0.5006  0.9532  ...   0.8333  0.4330
+      [torch.FloatTensor of size 32x500]
+    >>>> dense_output, dense_target = autoencoder(sparse_tensor, target=sparse_tensor, full_output=False)
+    >>>> dense_output # shape = 32x45 because only 45 columns are non-zero
+       0.0850  0.9490  ...   0.2430  0.5323
+       0.3519  0.4816  ...   0.9483  0.2497
+            ...         ⋱         ...
+       0.8744  0.8194  ...   0.5755  0.2090
+       0.5006  0.9532  ...   0.8333  0.4330
+      [torch.FloatTensor of size 32x45]
+  """
 
   def __init__(self, layer_sizes, activation_type='selu', last_layer_act='none',
                is_constrained=False, dropout_prob=0.0, noise_prob=0.0):
@@ -189,6 +243,19 @@ class LinearEmbedding(nn.Module):
 
 
 class MSELoss(nn.Module):
+  """
+  Computes the weighted mean squared error loss.
+
+  The weight for an observation x:
+
+  .. math::
+    w = 1 + confidence \\times x
+
+  Args:
+    confidence (float, optional): the weighting of positive observations.
+    size_average (bool, optional): whether to average the loss over the number observations in the
+      input tensors
+  """
 
   def __init__(self, confidence=0, size_average=True):
     super(MSELoss, self).__init__()
@@ -206,6 +273,16 @@ class MSELoss(nn.Module):
 
 
 class MultinomialNLLLoss(nn.Module):
+  """
+  Computes the negative log-likelihood of the multinomial distribution.
+
+  .. math::
+    \ell(x, y) = L = - y \cdot \log(softmax(x))
+
+  Args:
+    size_average (bool, optional): whether to average the loss over the number observations in the
+      input tensors
+  """
 
   def __init__(self, size_average=True):
     super(MultinomialNLLLoss, self).__init__()

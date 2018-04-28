@@ -8,10 +8,32 @@ import collections
 __Interaction = collections.namedtuple('__Interaction', ['item_id', 'inter'])
 
 class Interaction(__Interaction):
+  """
+  Represents a single interaction of a user with an item.
+
+  Args:
+    item_id (int or str): item id
+    inter (float): interaction value
+  """
   pass
 
 
 class RecommendationDataset(Dataset):
+  """
+  Represents a ``Dataset`` that iterates through the users interactions with items.
+
+  Indexing the dataset will return a tuple of the user input and target list of ``Interaction``.
+  In case a ``target_dataset`` was not provided, which is usually the case for training,
+  the target is the same as input, otherwise the target is the user interactions in the ``target_dataset``.
+
+  Args:
+    data (pandas.DataFrame): DataFrame that contains user-item interactions
+    target_dataset (RecommendationDataset, optional): RecommendationDataset that contains
+      the interactions to recommend.
+    user_col (str, optional): user column name
+    item_col (str, optional): item column name
+    inter_col (str, optional): interaction column name
+  """
 
   def __init__(self, data, target_dataset=None,
                user_col='user', item_col='item', inter_col='inter'):
