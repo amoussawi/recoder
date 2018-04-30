@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torch.autograd import Variable
 import torch.nn.functional as F
 
 from recoder.functional import activation
@@ -94,8 +93,8 @@ class SparseBatchAutoEncoder(nn.Module):
     self.__en_linear_embedding_layer = LinearEmbedding(self.en_embedding_layer, input_based=True)
     self.encoding_layers = nn.Sequential(*self.__create_coding_layers(self.layer_sizes[1:]))
 
-    nn.init.xavier_uniform(self.en_embedding_layer.weight)
-    nn.init.constant(self.__en_linear_embedding_layer.bias, 0)
+    nn.init.xavier_uniform_(self.en_embedding_layer.weight)
+    nn.init.constant_(self.__en_linear_embedding_layer.bias, 0)
 
   def __create_decoding_layers(self):
     _decoding_layers = self.__create_coding_layers(list(reversed(self.layer_sizes[1:])))
@@ -118,22 +117,20 @@ class SparseBatchAutoEncoder(nn.Module):
 
     self.__de_linear_embedding_layer = LinearEmbedding(self.de_embedding_layer, input_based=False)
 
-    nn.init.xavier_uniform(self.de_embedding_layer.weight)
-    nn.init.constant(self.__de_linear_embedding_layer.bias, 0)
+    nn.init.xavier_uniform_(self.de_embedding_layer.weight)
+    nn.init.constant_(self.__de_linear_embedding_layer.bias, 0)
 
   def __create_coding_layers(self, layer_sizes):
     layers = []
     for ind, layer_size in enumerate(layer_sizes[1:], 1):
       layer = nn.Linear(layer_sizes[ind-1], layer_size)
       layers.append(layer)
-      torch.nn.init.xavier_uniform(layer.weight)
-      torch.nn.init.constant(layer.bias, 0)
+      torch.nn.init.xavier_uniform_(layer.weight)
+      torch.nn.init.constant_(layer.bias, 0)
 
     return layers
 
   def __generate_reduced_batch(self, sparse_batch: torch.sparse.FloatTensor):
-    if type(sparse_batch) is Variable:
-      sparse_batch = sparse_batch.data
 
     indices = sparse_batch._indices()
 
@@ -141,17 +138,17 @@ class SparseBatchAutoEncoder(nn.Module):
     nonzero_inputs = torch.from_numpy(np.unique(nonzero_inputs.numpy()))
     batch_items_map = {}
     for ind, inp in enumerate(nonzero_inputs):
-      batch_items_map[inp] = ind
+      batch_items_map[inp.item()] = ind
 
     reduced_indices = torch.LongTensor(indices.size())
     reduced_indices[0, :] = indices[0, :]
-    reduced_indices[1, :] = torch.LongTensor([batch_items_map[ind] for ind in indices[1, :]])
+    reduced_indices[1, :] = torch.LongTensor([batch_items_map[ind.item()] for ind in indices[1, :]])
 
     reduced_sparse_batch = torch.sparse.FloatTensor(reduced_indices, sparse_batch._values(),
                                                     torch.Size([sparse_batch.size(0), len(nonzero_inputs)]))
     reduced_batch = reduced_sparse_batch.to_dense()
 
-    return Variable(reduced_batch), nonzero_inputs.long()
+    return reduced_batch, nonzero_inputs.long()
 
   def __tie_weights(self):
     for el, dl in zip(self.encoding_layers, reversed(self.decoding_layers)):
@@ -174,7 +171,7 @@ class SparseBatchAutoEncoder(nn.Module):
     dense_target = None
     out_active_embeddings = None
     if target is not None and full_output:
-      dense_target = Variable(target.to_dense())
+      dense_target = target.to_dense()
     elif target is not None:
       dense_target, out_active_embeddings = self.__generate_reduced_batch(target)
 
@@ -230,8 +227,8 @@ class LinearEmbedding(nn.Module):
 
   def forward(self, x, y):
     if x is not None:
-      _weight = self.embedding_layer(Variable(x))
-      _bias = self.bias if self.input_based else self.bias.index_select(0, Variable(x))
+      _weight = self.embedding_layer(x)
+      _bias = self.bias if self.input_based else self.bias.index_select(0, x)
     else:
       _weight = self.embedding_layer.weight
       _bias = self.bias

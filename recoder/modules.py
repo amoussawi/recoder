@@ -4,7 +4,6 @@ import glog as log
 
 import torch
 import torch.optim as optim
-from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 
@@ -228,7 +227,7 @@ class Recoder(object):
 
         loss.backward()
         self.optimizer.step()
-        aggregated_losses.append(loss.data[0])
+        aggregated_losses.append(loss.item())
 
         if (itr + 1) % summary_frequency == 0:
           log.info('[%d, %5d] %s: %.7f' % (epoch, itr + 1, self.loss_module_name, np.mean(aggregated_losses[-summary_frequency:])))
@@ -257,7 +256,7 @@ class Recoder(object):
       output, target = self.autoencoder(input, target=target, full_output=not self.apply_ns)
 
       loss = self.compute_loss(output, target)
-      total_loss += loss.data[0]
+      total_loss += loss.item()
       num_batches = itr + 1
 
     avg_loss = total_loss / num_batches
@@ -266,7 +265,7 @@ class Recoder(object):
 
   def compute_loss(self, output, target):
     # Average loss over samples in a batch
-    normalization = Variable(torch.FloatTensor([target.size(0)]))
+    normalization = torch.FloatTensor([target.size(0)])
     if self.use_cuda:
       normalization = normalization.cuda()
     loss = self.loss_module(output, target) / normalization
