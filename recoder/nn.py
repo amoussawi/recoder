@@ -72,6 +72,7 @@ class SparseBatchAutoEncoder(nn.Module):
     self.dropout_prob = dropout_prob
     self.noise_prob = noise_prob
     self.use_cuda = False
+    self.__cuda_device = None
 
     self.__create_encoding_layers()
     self.__create_decoding_layers()
@@ -156,7 +157,8 @@ class SparseBatchAutoEncoder(nn.Module):
 
   def cuda(self, device=None):
     self.use_cuda = True
-    return super().cuda()
+    self.__cuda_device = device
+    return super().cuda(device)
 
   def forward(self, input: torch.sparse.FloatTensor, target=None,
               full_output=True):
@@ -176,14 +178,14 @@ class SparseBatchAutoEncoder(nn.Module):
       dense_target, out_active_embeddings = self.__generate_reduced_batch(target)
 
     if self.use_cuda:
-      reduced_input = reduced_input.cuda()
-      in_active_embeddings = in_active_embeddings.cuda()
+      reduced_input = reduced_input.cuda(self.__cuda_device)
+      in_active_embeddings = in_active_embeddings.cuda(self.__cuda_device)
 
     if self.use_cuda and dense_target is not None:
-      dense_target = dense_target.cuda()
+      dense_target = dense_target.cuda(self.__cuda_device)
 
     if self.use_cuda and out_active_embeddings is not None:
-      out_active_embeddings = out_active_embeddings.cuda()
+      out_active_embeddings = out_active_embeddings.cuda(self.__cuda_device)
 
     # Normalize the input
     z = F.normalize(reduced_input, p=2, dim=1)
