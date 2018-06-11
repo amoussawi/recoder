@@ -11,7 +11,7 @@ import numpy as np
 
 from recoder.data import RecommendationDataset
 from recoder.metrics import RecommenderEvaluator
-from recoder.nn import SparseBatchAutoEncoder
+from recoder.nn import DynamicAutoEncoder
 from recoder.recommender import InferenceRecommender
 
 
@@ -36,14 +36,17 @@ class Recoder(object):
     loss_module (Module, optional): loss module used to train the model. required on 'train' mode.
     batch_size (int, optional): batch size
     optimizer_lr_milestones (int, optional): optimizer learning rate epochs milestones (0.1 decay).
-    apply_ns (bool, optional): whether to sample negative items on the output layer
+    num_neg_samples (int, optional): number of negative samples to generate for each user.
+      If `-1`, then all possible negative items will be sampled. If `0`, only the positive items from
+      the other examples in the mini-batch will be sampled. If `> 0`, then `num_neg_samples` samples
+      will be randomly sampled including the negative items from the other examples in the mini-batch.
   """
 
   def __init__(self, mode, model_file=None, hidden_layers=None, model_params=None,
                train_dataset=None, val_dataset=None, use_cuda=False,
                optimizer_type='sgd', lr=0.001, weight_decay=0, num_epochs=1,
                loss_module=None, batch_size=64, optimizer_lr_milestones=None,
-               apply_ns=True):
+               num_neg_samples=0):
 
     self.mode = mode
     self.model_file = model_file
@@ -59,9 +62,14 @@ class Recoder(object):
     self.train_dataset = train_dataset # type: RecommendationDataset
     self.val_dataset = val_dataset # type: RecommendationDataset
     self.use_cuda = use_cuda
-    self.apply_ns = apply_ns
+    self.num_neg_samples = num_neg_samples
 
     self.loss_module_name = self.loss_module.__class__.__name__
+
+    if self.use_cuda:
+      self.device = torch.device('cuda')
+    else:
+      self.device = torch.device('cpu')
 
     self._model_saved_state = None
     self.user_id_map = None
@@ -87,14 +95,13 @@ class Recoder(object):
   def __init_model(self):
     layer_sizes = [self.vector_dim] + self.hidden_layers
 
-    self.autoencoder = SparseBatchAutoEncoder(layer_sizes=layer_sizes,
-                                              **self.model_params)
+    self.autoencoder = DynamicAutoEncoder(layer_sizes=layer_sizes,
+                                          **self.model_params)
 
     if not self._model_saved_state is None:
       self.autoencoder.load_state_dict(self._model_saved_state['model'])
 
-    if self.use_cuda:
-      self.autoencoder.cuda()
+    self.autoencoder = self.autoencoder.to(device=self.device)
 
     self.autoencoder.eval()
 
@@ -123,10 +130,11 @@ class Recoder(object):
     self.lr_scheduler = MultiStepLR(self.optimizer, milestones=self.optimizer_lr_milestones,
                                     gamma=0.1, last_epoch=_last_epoch)
 
+    collate_fn = lambda x: self.__collate_batch(x, with_ns=(self.num_neg_samples >= 0))
     self.train_dataloader = DataLoader(self.train_dataset, batch_size=self.batch_size,
-                                       shuffle=True, collate_fn=self.collate_to_sparse_batch)
+                                       shuffle=True, collate_fn=collate_fn)
     self.val_dataloader = DataLoader(self.val_dataset, batch_size=self.batch_size,
-                                      shuffle=True, collate_fn=self.collate_to_sparse_batch)
+                                     shuffle=True, collate_fn=collate_fn)
 
   def __init_optimizer(self):
     params = []
@@ -218,12 +226,20 @@ class Recoder(object):
       aggregated_losses = []
       self.lr_scheduler.step()
       log.info('Epoch Learning Rate: {}'.format(self.lr_scheduler.get_lr()[0]))
-      for itr, (input, target) in enumerate(self.train_dataloader):
+      for itr, ((input, input_words), (target, target_words)) in enumerate(self.train_dataloader):
         self.optimizer.zero_grad()
 
-        output, reduced_target = self.autoencoder(input, target=target, full_output=not self.apply_ns)
+        input = input.to(device=self.device)
+        target = target.to(device=self.device)
+        if input_words is not None:
+          input_words = input_words.to(device=self.device)
+        if target_words is not None:
+          target_words = target_words.to(device=self.device)
 
-        loss = self.compute_loss(output, reduced_target)
+        output = self.autoencoder(input, input_words=input_words,
+                                  target_words=target_words)
+
+        loss = self.compute_loss(output, target)
 
         loss.backward()
         self.optimizer.step()
@@ -232,7 +248,7 @@ class Recoder(object):
         if (itr + 1) % summary_frequency == 0:
           log.info('[%d, %5d] %s: %.7f' % (epoch, itr + 1, self.loss_module_name, np.mean(aggregated_losses[-summary_frequency:])))
 
-      log.info('Taining average {} loss: {}'.format(self.loss_module_name, 
+      log.info('Taining average {} loss: {}'.format(self.loss_module_name,
                                                     np.mean(aggregated_losses)))
 
       if epoch % val_epoch_freq == 0 or epoch == self.num_epochs:
@@ -251,9 +267,17 @@ class Recoder(object):
     total_loss = 0.0
     num_batches = 1
 
-    for itr, (input, target) in enumerate(self.val_dataloader):
+    for itr, ((input, input_words), (target, target_words)) in enumerate(self.val_dataloader):
 
-      output, target = self.autoencoder(input, target=target, full_output=not self.apply_ns)
+      input = input.to(device=self.device)
+      target = target.to(device=self.device)
+      if input_words is not None:
+        input_words = input_words.to(device=self.device)
+      if target_words is not None:
+        target_words = target_words.to(device=self.device)
+
+      output = self.autoencoder(input, input_words=input_words,
+                                target_words=target_words)
 
       loss = self.compute_loss(output, target)
       total_loss += loss.item()
@@ -265,62 +289,71 @@ class Recoder(object):
 
   def compute_loss(self, output, target):
     # Average loss over samples in a batch
-    normalization = torch.FloatTensor([target.size(0)])
-    if self.use_cuda:
-      normalization = normalization.cuda()
+    normalization = torch.FloatTensor([target.size(0)]).to(device=self.device)
     loss = self.loss_module(output, target) / normalization
     return loss
 
-  def collate_to_sparse_batch(self, batch):
-    """
-    Collates a batch of users input and target list of ``Interaction`` into
-    a tuple of ``torch.sparse.FloatTensor`` matrices
-
-    Args:
-      batch (list): each sample is a tuple containing an input and a target
-        list of ``Interaction``.
-
-    Returns:
-      tuple: tuple of sparse input tensor and a sparse target tensor
-    """
+  def __collate_batch(self, batch, with_ns=True):
     _input_batch = [i for i, t in batch]
     _target_batch = [t for d, t in batch]
 
-    _sparse_input_batch = self.__collate_to_sparse_batch(_input_batch)
+    input = self.__collate_interactions_batch(_input_batch, with_ns=with_ns)
 
     if _input_batch[0] is _target_batch[0]: # If target is input no need to re-compute
-      _sparse_target_batch = _sparse_input_batch
+      target = input
     else:
-      _sparse_target_batch = self.__collate_to_sparse_batch(_target_batch)
+      target = self.__collate_interactions_batch(_target_batch, with_ns=with_ns)
 
-    return _sparse_input_batch, _sparse_target_batch
+    return input, target
 
-  def __collate_to_sparse_batch(self, batch):
-    samples_inds = []
-    inter_inds = []
-    inter_val = []
+  def __collate_interactions_batch(self, batch, with_ns=True):
     batch_size = len(batch)
 
-    _map = self.item_id_map
+    samples_inds = []
+    inter_inds = []
+    inter_vals = []
+    for sample_i, user_inters in enumerate(batch):
+      num_inters = len(user_inters)
+      samples_inds.extend([sample_i] * num_inters)
+      for item, inter_val in user_inters:
+        inter_inds.append(self.item_id_map[item])
+        inter_vals.append(inter_val)
 
-    for sample_i, sample in enumerate(batch):
-      num_values = len(sample)
-      samples_inds += [sample_i] * num_values
-      for target, inter in sample:
-        inter_inds.append(_map[target])
-        inter_val.append(inter)
+    if self.num_neg_samples > 0 and with_ns:
+      negative_items = np.random.randint(0, self.vector_dim, self.num_neg_samples)
+      negative_items = negative_items[np.isin(negative_items, inter_inds, invert=True)]
+      num_negative_items = len(negative_items)
+
+      # It's enough to fill the first sample in the batch with negative items
+      # the others will be filled by transforming the sparse matrix into dense
+      if num_negative_items > 0:
+        samples_inds.extend(np.repeat(0, num_negative_items))
+        inter_inds.extend(negative_items)
+        inter_vals.extend(np.repeat(0, num_negative_items))
+
+      active_columns_ordered = np.unique(inter_inds)
+      new_map = dict([(v, ind) for ind, v in enumerate(active_columns_ordered)])
+      inter_inds = list(map(lambda x: new_map[x], inter_inds))
+      _vector_dim = len(active_columns_ordered)
+      active_cols = torch.LongTensor(active_columns_ordered)
+    else:
+      _vector_dim = self.vector_dim
+      active_cols = None
 
     ind_lt = torch.LongTensor([samples_inds, inter_inds])
-    val_ft = torch.FloatTensor(np.array(inter_val, dtype=np.float))
+    val_ft = torch.FloatTensor(inter_vals)
 
-    batch = torch.sparse.FloatTensor(ind_lt, val_ft, torch.Size([batch_size, self.vector_dim]))
+    batch = torch.sparse.FloatTensor(ind_lt, val_ft, torch.Size([batch_size, _vector_dim]))
 
-    return batch
+    batch = batch.to_dense()
+    return batch, active_cols
 
   def predict(self, users_hist, return_input=False):
-    input, target = self.collate_to_sparse_batch(list(zip(users_hist, users_hist)))
-    output = self.autoencoder(input).cpu()
-    return output, input.to_dense() if return_input else output
+    (input, input_words), _ = self.__collate_batch(list(zip(users_hist, users_hist)),
+                                                   with_ns=False)
+    input = input.to(device=self.device)
+    output = self.autoencoder(input, full_output=True).cpu()
+    return output, input.cpu() if return_input else output
 
   def evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
     """
