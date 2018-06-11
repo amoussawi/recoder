@@ -4,26 +4,18 @@ import torch.nn.functional as F
 
 from recoder.functional import activation
 
-import numpy as np
 
-class SparseBatchAutoEncoder(nn.Module):
+class DynamicAutoEncoder(nn.Module):
   """
-  An AutoEncoder module that processes sparse tensors efficiently for training.
+  An AutoEncoder module that processes variable size vectors. This is
+  particularly efficient for cases where we only want to reconstruct sub-samples
+  of a large sparse vector and not the whole vector, i.e negative sampling for
+  collaborative filtering and NLP.
 
-  This module accepts as input a sparse tensor of shape (N, M), where N = mini-batch size,
-  and M = input vector size. It will reshape and densify the sparse tensor to only use the
-  columns that are non-zero.
-
-  The efficiency of the model comes while training. A target sparse tensor can be passed, which will also
-  be reshaped and densified, similar to the input, and returned as a dense tensor to be used
-  with the output in the loss function. The columns of the target tensor that are non-zero are
-  used to select which output units are necessary to compute for that batch. This can be done by setting
-  full_output to False. This is useful when it's not necessary to reconstruct the zeros (explicit feedback)
-  or when negative sampling on the zero output units is needed as the case in implicit feedback
-  recommendations.
-
-  Setting full_output to True will simply return a target.to_dense() and having the whole
-  output units computed.
+  Let `F` be a `DynamicAutoEncoder` function that reconstructs vectors of size `d`,
+  let `X` be a matrix of size `Bxd` where `B` is the batch size, and
+  let `Z` be any matrix and `I` be a vector, such that `1 <= I[i] <= d`
+  and `Z = X[:, I]`. The reconstruction of `Z` is `F(Z, I)`. See `Examples`.
 
   Args:
     layer_sizes (list): autoencoder layer sizes. only input and encoder layers.
@@ -37,27 +29,40 @@ class SparseBatchAutoEncoder(nn.Module):
 
   Examples::
 
-    >>>> autoencoder = SparseBatchAutoEncoder([500,100])
+    >>>> autoencoder = DynamicAutoEncoder([500,100])
     >>>> batch_size = 32
-    >>>> i = torch.LongTensor([np.arange(45) % batch_size, np.arange(45)])
-    >>>> v = torch.FloatTensor(np.ones(45))
-    >>>> sparse_tensor = torch.sparse.FloatTensor(i, v, torch.Size([32,500]))
-    >>>> dense_output = autoencoder(sparse_tensor)
-    >>>> dense_output
+    >>>> input = torch.rand(batch_size, 5)
+    >>>> input_words = torch.LongTensor([10, 126, 452, 29, 34])
+    >>>> output = autoencoder(input, input_words=input_words)
+    >>>> output
        0.0850  0.9490  ...   0.2430  0.5323
        0.3519  0.4816  ...   0.9483  0.2497
             ...         ⋱         ...
        0.8744  0.8194  ...   0.5755  0.2090
        0.5006  0.9532  ...   0.8333  0.4330
+      [torch.FloatTensor of size 32x5]
+    >>>>
+    >>>> # predicting a different target of words
+    >>>> target_words = torch.LongTensor([31, 14, 95, 49, 10, 36, 239])
+    >>>> output = autoencoder(input, input_words=input_words, target_words=target_words)
+    >>>> output
+       0.5446  0.5468  ...   0.9854  0.6465
+       0.0564  0.1238  ...   0.5645  0.6576
+            ...         ⋱         ...
+       0.0498  0.6978  ...   0.8462  0.2135
+       0.6540  0.5686  ...   0.6540  0.4330
+      [torch.FloatTensor of size 32x7]
+    >>>>
+    >>>> # reconstructing the whole vector
+    >>>> input = torch.rand(batch_size, 500)
+    >>>> output = autoencoder(input)
+    >>>> output
+       0.0865  0.9054  ...   0.8987  0.0456
+       0.9852  0.6540  ...   0.1205  0.8488
+            ...         ⋱         ...
+       0.4650  0.3540  ...   0.5646  0.5605
+       0.6940  0.2140  ...   0.9820  0.5405
       [torch.FloatTensor of size 32x500]
-    >>>> dense_output, dense_target = autoencoder(sparse_tensor, target=sparse_tensor, full_output=False)
-    >>>> dense_output # shape = 32x45 because only 45 columns are non-zero
-       0.0850  0.9490  ...   0.2430  0.5323
-       0.3519  0.4816  ...   0.9483  0.2497
-            ...         ⋱         ...
-       0.8744  0.8194  ...   0.5755  0.2090
-       0.5006  0.9532  ...   0.8333  0.4330
-      [torch.FloatTensor of size 32x45]
   """
 
   def __init__(self, layer_sizes, activation_type='selu', last_layer_act='none',
@@ -71,8 +76,6 @@ class SparseBatchAutoEncoder(nn.Module):
     self.layer_sizes = layer_sizes
     self.dropout_prob = dropout_prob
     self.noise_prob = noise_prob
-    self.use_cuda = False
-    self.__cuda_device = None
 
     self.__create_encoding_layers()
     self.__create_decoding_layers()
@@ -131,68 +134,28 @@ class SparseBatchAutoEncoder(nn.Module):
 
     return layers
 
-  def __generate_reduced_batch(self, sparse_batch: torch.sparse.FloatTensor):
-
-    indices = sparse_batch._indices()
-
-    nonzero_inputs = indices[1]
-    nonzero_inputs = torch.from_numpy(np.unique(nonzero_inputs.numpy()))
-    batch_items_map = {}
-    for ind, inp in enumerate(nonzero_inputs):
-      batch_items_map[inp.item()] = ind
-
-    reduced_indices = torch.LongTensor(indices.size())
-    reduced_indices[0, :] = indices[0, :]
-    reduced_indices[1, :] = torch.LongTensor([batch_items_map[ind.item()] for ind in indices[1, :]])
-
-    reduced_sparse_batch = torch.sparse.FloatTensor(reduced_indices, sparse_batch._values(),
-                                                    torch.Size([sparse_batch.size(0), len(nonzero_inputs)]))
-    reduced_batch = reduced_sparse_batch.to_dense()
-
-    return reduced_batch, nonzero_inputs.long()
-
   def __tie_weights(self):
     for el, dl in zip(self.encoding_layers, reversed(self.decoding_layers)):
       dl.weight = el.weight.t()
 
-  def cuda(self, device=None):
-    self.use_cuda = True
-    self.__cuda_device = device
-    return super().cuda(device)
+  def forward(self, input, input_words=None,
+              target_words=None, full_output=False):
 
-  def forward(self, input: torch.sparse.FloatTensor, target=None,
-              full_output=True):
+    if target_words is None and not full_output:
+      target_words = input_words
 
-    assert full_output or (not full_output and target is not None)
+    if full_output:
+      target_words = None
 
     if self.is_constrained:
       self.__tie_weights()
 
-    reduced_input, in_active_embeddings = self.__generate_reduced_batch(input)
-
-    dense_target = None
-    out_active_embeddings = None
-    if target is not None and full_output:
-      dense_target = target.to_dense()
-    elif target is not None:
-      dense_target, out_active_embeddings = self.__generate_reduced_batch(target)
-
-    if self.use_cuda:
-      reduced_input = reduced_input.cuda(self.__cuda_device)
-      in_active_embeddings = in_active_embeddings.cuda(self.__cuda_device)
-
-    if self.use_cuda and dense_target is not None:
-      dense_target = dense_target.cuda(self.__cuda_device)
-
-    if self.use_cuda and out_active_embeddings is not None:
-      out_active_embeddings = out_active_embeddings.cuda(self.__cuda_device)
-
     # Normalize the input
-    z = F.normalize(reduced_input, p=2, dim=1)
+    z = F.normalize(input, p=2, dim=1)
     if self.noise_prob > 0.0:
       z = self.noise_layer(z)
 
-    z = self.__en_linear_embedding_layer(in_active_embeddings, z)
+    z = self.__en_linear_embedding_layer(input_words, z)
     z = activation(z, self.activation_type)
 
     for encoding_layer in self.encoding_layers:
@@ -204,14 +167,11 @@ class SparseBatchAutoEncoder(nn.Module):
     for decoding_layer in self.decoding_layers:
       z = activation(decoding_layer(z), self.activation_type)
 
-    z = self.__de_linear_embedding_layer(out_active_embeddings, z)
+    z = self.__de_linear_embedding_layer(target_words, z)
 
     z = activation(z, self.last_layer_act)
 
-    if dense_target is None:
-      return z
-    else:
-      return z, dense_target
+    return z
 
 
 class LinearEmbedding(nn.Module):
