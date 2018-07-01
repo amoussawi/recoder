@@ -319,7 +319,7 @@ class Recoder(object):
         inter_inds.append(self.item_id_map[item])
         inter_vals.append(inter_val)
 
-    if self.num_neg_samples > 0 and with_ns:
+    if self.num_neg_samples >= 0 and with_ns:
       negative_items = np.random.randint(0, self.vector_dim, self.num_neg_samples)
       negative_items = negative_items[np.isin(negative_items, inter_inds, invert=True)]
       num_negative_items = len(negative_items)
