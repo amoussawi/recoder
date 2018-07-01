@@ -165,6 +165,7 @@ class Recoder(object):
     if not os.path.isfile(model_file):
       raise Exception('No state file found in {}'.format(model_file))
     self._model_saved_state = torch.load(model_file, map_location='cpu')
+    self.hidden_layers = self._model_saved_state['hidden_layers']
     self.model_params = self._model_saved_state['model_params']
     self.item_id_map = self._model_saved_state['item_id_map']
     self.user_id_map = self._model_saved_state['user_id_map']
@@ -188,6 +189,7 @@ class Recoder(object):
     log.info("Saving model to {}".format(checkpoint_file))
     current_state = {
       'vector_dim': self.vector_dim,
+      'hidden_layers': self.hidden_layers,
       'model_params': self.model_params,
       'user_id_map': self.user_id_map,
       'item_id_map': self.item_id_map,
