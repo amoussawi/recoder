@@ -20,7 +20,7 @@ common_params = {
 }
 
 method = 'inference'
-model_file = model_dir + 'bce_no_ns_d_0.0_n_0.5_200_epoch_80.model'
+model_file = model_dir + 'bce_ns_d_0.0_n_0.5_200_epoch_80.model'
 index_file = model_dir + 'bce_ns_d_0.0_n_0.5_200_epoch_80.model.index'
 
 num_recommendations = 100
@@ -40,7 +40,7 @@ val_te_dataset = RecommendationDataset(data=val_te_df, **common_params)
 val_tr_dataset = RecommendationDataset(data=val_tr_df, **common_params,
                                        target_dataset=val_te_dataset)
 
-metrics = [AveragePrecision(k=100),Recall(k=20), Recall(k=50), Recall(k=100), NDCG(k=100)]
+metrics = [Recall(k=20), Recall(k=50), NDCG(k=100)]
 evaluator = RecommenderEvaluator(recommender, metrics)
 
 metrics_accumulated = evaluator.evaluate(val_tr_dataset, batch_size=500)

@@ -30,9 +30,11 @@ val_te_dataset = RecommendationDataset(data=val_te_df, **common_params)
 val_tr_dataset = RecommendationDataset(data=val_tr_df, **common_params,
                                        target_dataset=val_te_dataset)
 
+train_dataset.preload()
+
 params = {
+  'hidden_layers': [200],
   'model_params': {
-    'hidden_layers_sizes': [200],
     'activation_type': 'tanh',
     'is_constrained': False,
     'dropout_prob': 0.0,
@@ -48,8 +50,9 @@ params = {
   'loss_module': BCEWithLogitsLoss(size_average=False),
   'train_dataset': train_dataset,
   'val_dataset': val_tr_dataset,
-  'apply_ns': False,
+  'num_neg_samples': -1,
   'use_cuda': True,
+  'num_data_workers': 4,
   # 'model_file': model_dir + 'bce_ns_d_0.0_n_0.5_200_epoch_80.model',
 }
 

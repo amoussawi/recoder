@@ -8,10 +8,8 @@ from recoder.nn import MSELoss, MultinomialNLLLoss
 from recoder.metrics import AveragePrecision, Recall, NDCG
 
 from torch.nn import BCEWithLogitsLoss
-
 import torch
 
-# torch.set_num_threads(4)
 
 data_dir = 'data/ml-20m/pro_sg/'
 model_dir = 'models/ml-20m/'
@@ -31,9 +29,11 @@ val_te_dataset = RecommendationDataset(data=val_te_df, **common_params)
 val_tr_dataset = RecommendationDataset(data=val_tr_df, **common_params,
                                        target_dataset=val_te_dataset)
 
+train_dataset.preload()
+
 params = {
+  'hidden_layers': [200],
   'model_params': {
-    'hidden_layers_sizes': [200],
     'activation_type': 'tanh',
     'is_constrained': False,
     'dropout_prob': 0.0,
@@ -49,8 +49,9 @@ params = {
   'loss_module': BCEWithLogitsLoss(size_average=False),
   'train_dataset': train_dataset,
   'val_dataset': val_tr_dataset,
-  'apply_ns': True,
-  'use_cuda': False,
+  'num_neg_samples': 0,
+  'use_cuda': True,
+  'num_data_workers': 4,
   # 'model_file': model_dir + 'bce_ns_d_0.0_n_0.5_200_epoch_50.model',
 }
 
