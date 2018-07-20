@@ -245,10 +245,10 @@ class Recoder(object):
 
         loss.backward()
         self.optimizer.step()
-        aggregated_losses.append(loss.item())
 
         if (itr + 1) % summary_frequency == 0:
-          log.info('[%d, %5d] %s: %.7f' % (epoch, itr + 1, self.loss_module_name, np.mean(aggregated_losses[-summary_frequency:])))
+          aggregated_losses.append(loss.item())
+          log.info('[%d, %5d] %s: %.7f' % (epoch, itr + 1, self.loss_module_name, aggregated_losses[-1]))
 
       log.info('Taining average {} loss: {}'.format(self.loss_module_name,
                                                     np.mean(aggregated_losses)))
