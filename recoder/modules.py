@@ -46,7 +46,7 @@ class Recoder(object):
                train_dataset=None, val_dataset=None, use_cuda=False,
                optimizer_type='sgd', lr=0.001, weight_decay=0, num_epochs=1,
                loss_module=None, batch_size=64, optimizer_lr_milestones=None,
-               num_neg_samples=0):
+               num_neg_samples=0, num_data_workers=0):
 
     self.mode = mode
     self.model_file = model_file
@@ -63,6 +63,7 @@ class Recoder(object):
     self.val_dataset = val_dataset # type: RecommendationDataset
     self.use_cuda = use_cuda
     self.num_neg_samples = num_neg_samples
+    self.num_data_workers = num_data_workers
 
     self.loss_module_name = self.loss_module.__class__.__name__
 
@@ -132,9 +133,11 @@ class Recoder(object):
 
     collate_fn = lambda x: self.__collate_batch(x, with_ns=(self.num_neg_samples >= 0))
     self.train_dataloader = DataLoader(self.train_dataset, batch_size=self.batch_size,
-                                       shuffle=True, collate_fn=collate_fn)
+                                       shuffle=True, collate_fn=collate_fn,
+                                       num_workers=self.num_data_workers)
     self.val_dataloader = DataLoader(self.val_dataset, batch_size=self.batch_size,
-                                     shuffle=True, collate_fn=collate_fn)
+                                     shuffle=True, collate_fn=collate_fn,
+                                     num_workers=self.num_data_workers)
 
   def __init_optimizer(self):
     params = []
