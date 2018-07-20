@@ -45,9 +45,6 @@ class RecommendationDataset(Dataset):
     self.inter_col = inter_col
     self.target_dataset = target_dataset # type: RecommendationDataset
 
-    self.index_col = self.user_col
-    self.target_col = self.item_col
-
     self.__load_data()
 
   def __load_data(self):
@@ -58,7 +55,7 @@ class RecommendationDataset(Dataset):
       self.users = list(set(self.users + self.target_dataset.users))
       self.items = list(set(self.items + self.target_dataset.items))
 
-    _grouped_data_df = self.data.groupby(by=self.index_col)
+    _grouped_data_df = self.data.groupby(by=self.user_col)
 
     if self.target_dataset is None:
       self.__groups = list(_grouped_data_df.groups.keys())
@@ -67,26 +64,43 @@ class RecommendationDataset(Dataset):
       # to avoid having groups not in the target dataset
       self.__groups = list(np.intersect1d(_groups, self.target_dataset.__groups))
 
+    self.__groups_index = {g:i for i, g in enumerate(self.__groups)}
     self.__grouped_data = _grouped_data_df
 
-  def __len__(self):
-    return len(self.__groups)
+    self.__interactions = [-1] * len(self.__groups)
 
-  def __getitem__(self, index):
-    _group = self.__groups[index]
-    _data = self.__grouped_data.get_group(_group)
+  def __get_interactions(self, index):
+    if self.__interactions[index] != -1:
+      return self.__interactions[index]
+
+    group = self.__groups[index]
+    _data = self.__grouped_data.get_group(group)
 
     interactions = []
-    for item_id, inter in zip(_data[self.target_col], _data[self.inter_col]):
+    for item_id, inter in zip(_data[self.item_col], _data[self.inter_col]):
       interactions.append(Interaction(item_id=item_id, inter=inter))
 
-    if self.target_dataset is None:
-      _target_data = _data
-      target_interactions = interactions
+    self.__interactions[index] = interactions
+    return interactions
+
+  def __len__(self):
+    return len(self.__interactions)
+
+  def __getitem__(self, index):
+    interactions = self.__get_interactions(index)
+
+    if self.target_dataset is not None:
+      _group = self.__groups[index]
+      target_index = self.target_dataset.__groups_index[_group]
+      target_interactions = self.target_dataset.__get_interactions(target_index)
     else:
-      _target_data = self.target_dataset.__grouped_data.get_group(_group)
-      target_interactions = []
-      for item_id, inter in zip(_target_data[self.target_col], _target_data[self.inter_col]):
-        target_interactions.append(Interaction(item_id=item_id, inter=inter))
+      target_interactions = interactions
 
     return interactions, target_interactions
+
+  def preload(self):
+    """
+    Preloads the data into memory
+    """
+    for i in range(len(self)):
+      self[i]
