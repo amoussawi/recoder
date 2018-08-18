@@ -5,14 +5,14 @@ import torch.nn.functional as F
 from recoder.functional import activation
 
 
-class DynamicAutoEncoder(nn.Module):
+class DynamicAutoencoder(nn.Module):
   """
-  An AutoEncoder module that processes variable size vectors. This is
+  An Autoencoder module that processes variable size vectors. This is
   particularly efficient for cases where we only want to reconstruct sub-samples
   of a large sparse vector and not the whole vector, i.e negative sampling for
   collaborative filtering and NLP.
 
-  Let `F` be a `DynamicAutoEncoder` function that reconstructs vectors of size `d`,
+  Let `F` be a `DynamicAutoencoder` function that reconstructs vectors of size `d`,
   let `X` be a matrix of size `Bxd` where `B` is the batch size, and
   let `Z` be any matrix and `I` be a vector, such that `1 <= I[i] <= d`
   and `Z = X[:, I]`. The reconstruction of `Z` is `F(Z, I)`. See `Examples`.
@@ -29,7 +29,7 @@ class DynamicAutoEncoder(nn.Module):
 
   Examples::
 
-    >>>> autoencoder = DynamicAutoEncoder([500,100])
+    >>>> autoencoder = DynamicAutoencoder([500,100])
     >>>> batch_size = 32
     >>>> input = torch.rand(batch_size, 5)
     >>>> input_words = torch.LongTensor([10, 126, 452, 29, 34])

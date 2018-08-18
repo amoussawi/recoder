@@ -11,21 +11,21 @@ import numpy as np
 
 from recoder.data import RecommendationDataset
 from recoder.metrics import RecommenderEvaluator
-from recoder.nn import DynamicAutoEncoder
+from recoder.nn import DynamicAutoencoder
 from recoder.recommender import InferenceRecommender
 
 
 class Recoder(object):
   """
-  Module to train/evaluate a recommendation AutoEncoder-based model
+  Module to train/evaluate a recommendation Autoencoder-based model
 
   Args:
     mode (str): the mode of the model, either 'train' or 'model'. 'model' only used when loading a
       pre-trained model.
     model_file (str, optional): the model file. required in 'model' model. and used to continue training
       in 'train' mode.
-    hidden_layers (list, optional): AutoEncoder hidden layers sizes. required in 'train' mode.
-    model_params (str, optional): the AutoEncoder model extra parameters other than layer_sizes.
+    hidden_layers (list, optional): Autoencoder hidden layers sizes. required in 'train' mode.
+    model_params (str, optional): the Autoencoder model extra parameters other than layer_sizes.
     train_dataset (RecommendationDataset, optional): train dataset. required in 'train' mode.
     val_dataset (RecommendationDataset, optional): validation dataset. required in 'train' mode.
     use_cuda (bool, optional): use GPU on training/evaluation the model.
@@ -96,7 +96,7 @@ class Recoder(object):
   def __init_model(self):
     layer_sizes = [self.vector_dim] + self.hidden_layers
 
-    self.autoencoder = DynamicAutoEncoder(layer_sizes=layer_sizes,
+    self.autoencoder = DynamicAutoencoder(layer_sizes=layer_sizes,
                                           **self.model_params)
 
     if not self._model_saved_state is None:

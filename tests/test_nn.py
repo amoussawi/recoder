@@ -1,4 +1,4 @@
-from recoder.nn import DynamicAutoEncoder
+from recoder.nn import DynamicAutoencoder
 
 import torch
 
@@ -7,11 +7,11 @@ import pytest
 
 @pytest.fixture
 def autoencoder():
-  autoencoder = DynamicAutoEncoder([500, 300, 200])
+  autoencoder = DynamicAutoencoder([500, 300, 200])
   return autoencoder
 
 
-def test_DynamicAutoEncoder(autoencoder):
+def test_DynamicAutoencoder(autoencoder):
   assert autoencoder.en_embedding_layer.embedding_dim == 300
   assert autoencoder.de_embedding_layer.embedding_dim == 300
 
