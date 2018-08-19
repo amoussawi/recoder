@@ -1,5 +1,5 @@
 from recoder.embedding import AnnoyEmbeddingsIndex
-from recoder.modules import Recoder
+from recoder.model import Recoder
 import torch
 
 def build_embeddings_all_layers(model):

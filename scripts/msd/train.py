@@ -3,7 +3,7 @@ import pandas as pd
 
 import glog
 
-from recoder import Recoder
+from recoder.model import Recoder
 from recoder.data import RecommendationDataset
 from recoder.nn import MSELoss, MultinomialNLLLoss
 from recoder.metrics import AveragePrecision, Recall, NDCG

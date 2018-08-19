@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from recoder.data import RecommendationDataset
-from recoder.modules import Recoder
+from recoder.model import Recoder
 from recoder.recommender import InferenceRecommender, SimilarityRecommender
 from recoder.embedding import AnnoyEmbeddingsIndex, MemCacheEmbeddingsIndex
 from recoder.metrics import AveragePrecision, Recall, NDCG, RecommenderEvaluator
