@@ -2,7 +2,11 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from recoder.functional import activation
+
+def activation(x, act):
+  if act == 'none': return x
+  func = getattr(torch.nn.functional, act)
+  return func(x)
 
 
 class DynamicAutoencoder(nn.Module):
