@@ -2,8 +2,13 @@ import numpy as np
 
 
 def unzip(l):
-  a, b = list(zip(*l))
-  return list(a), list(b)
+  """
+  Returns the inverse operation of `zip` on `list`.
+
+  Args:
+    l (list): the list to unzip
+  """
+  return list(map(list, zip(*l)))
 
 
 def normalize(x, axis=None):
