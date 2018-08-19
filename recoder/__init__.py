@@ -1,1 +1,1 @@
-from .modules import Recoder
+from .model import Recoder
