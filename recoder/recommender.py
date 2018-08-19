@@ -4,8 +4,6 @@ import numpy as np
 
 import recoder.utils as utils
 
-from sklearn.metrics.pairwise import cosine_similarity
-
 
 class Recommender(object):
 
@@ -79,7 +77,10 @@ class SimilarityRecommender(Recommender):
     user_embeddings = np.array([self.embeddings_index.get_embedding(item_id)
                                 for item_id in user_items])
 
-    scores = cosine_similarity(pool_embeddings, user_embeddings) # range: -1 to 1
+    pool_embeddings = utils.normalize(pool_embeddings, axis=1)
+    user_embeddings = utils.normalize(user_embeddings, axis=1)
+
+    scores = np.dot(pool_embeddings, np.transpose(user_embeddings)) # range: -1 to 1
     scores = (scores + 1) / 2 # range: 0 to 1
 
     scaled_scores = np.power(scores, self.scale)
