@@ -25,7 +25,7 @@ class Recoder(object):
     model_file (str, optional): the model file. required in 'model' model. and used to continue training
       in 'train' mode.
     hidden_layers (list, optional): Autoencoder hidden layers sizes. required in 'train' mode.
-    model_params (str, optional): the Autoencoder model extra parameters other than layer_sizes.
+    model_params (dict, optional): the Autoencoder model extra parameters other than layer_sizes.
     train_dataset (RecommendationDataset, optional): train dataset. required in 'train' mode.
     val_dataset (RecommendationDataset, optional): validation dataset. required in 'train' mode.
     use_cuda (bool, optional): use GPU on training/evaluation the model.
@@ -35,7 +35,7 @@ class Recoder(object):
     num_epochs (int, optional): number of epochs to train the model
     loss_module (Module, optional): loss module used to train the model. required on 'train' mode.
     batch_size (int, optional): batch size
-    optimizer_lr_milestones (int, optional): optimizer learning rate epochs milestones (0.1 decay).
+    optimizer_lr_milestones (list, optional): optimizer learning rate epochs milestones (0.1 decay).
     num_neg_samples (int, optional): number of negative samples to generate for each user.
       If `-1`, then all possible negative items will be sampled. If `0`, only the positive items from
       the other examples in the mini-batch will be sampled. If `> 0`, then `num_neg_samples` samples
