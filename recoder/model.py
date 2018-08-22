@@ -6,6 +6,7 @@ import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
+from torch.nn import BCEWithLogitsLoss
 
 import numpy as np
 
@@ -13,6 +14,7 @@ from recoder.data import RecommendationDataset
 from recoder.metrics import RecommenderEvaluator
 from recoder.nn import DynamicAutoencoder
 from recoder.recommender import InferenceRecommender
+from recoder.nn import MSELoss, MultinomialNLLLoss
 
 
 class Recoder(object):
@@ -33,7 +35,10 @@ class Recoder(object):
     lr (float, optional): learning rate.
     weight_decay (float, optional): weight decay (L2 normalization).
     num_epochs (int, optional): number of epochs to train the model
-    loss_module (Module, optional): loss module used to train the model. required on 'train' mode.
+    loss (str, optional): loss function used to train the model. required on 'train' mode.
+      'mse' for `recoder.nn.MSELoss`, 'logistic' for `torch.nn.BCEWithLogitsLoss`,
+      and 'logloss' for `recoder.nn.MultinomialNLLLoss`
+    loss_params (dict, optional): loss function extra params based on loss module.
     batch_size (int, optional): batch size
     optimizer_lr_milestones (list, optional): optimizer learning rate epochs milestones (0.1 decay).
     num_neg_samples (int, optional): number of negative samples to generate for each user.
@@ -45,7 +50,7 @@ class Recoder(object):
   def __init__(self, mode, model_file=None, hidden_layers=None, model_params=None,
                train_dataset=None, val_dataset=None, use_cuda=False,
                optimizer_type='sgd', lr=0.001, weight_decay=0, num_epochs=1,
-               loss_module=None, batch_size=64, optimizer_lr_milestones=None,
+               loss='mse', loss_params=None, batch_size=64, optimizer_lr_milestones=None,
                num_neg_samples=0, num_data_workers=0):
 
     self.mode = mode
@@ -56,7 +61,8 @@ class Recoder(object):
     self.lr = lr
     self.weight_decay = weight_decay
     self.num_epochs = num_epochs
-    self.loss_module = loss_module
+    self.loss = loss
+    self.loss_params = loss_params if loss_params else {}
     self.batch_size = batch_size
     self.optimizer_lr_milestones = optimizer_lr_milestones if optimizer_lr_milestones else []
     self.train_dataset = train_dataset # type: RecommendationDataset
@@ -64,8 +70,6 @@ class Recoder(object):
     self.use_cuda = use_cuda
     self.num_neg_samples = num_neg_samples
     self.num_data_workers = num_data_workers
-
-    self.loss_module_name = self.loss_module.__class__.__name__
 
     if self.use_cuda:
       self.device = torch.device('cuda')
@@ -120,6 +124,7 @@ class Recoder(object):
 
     self.__init_model()
     self.__init_optimizer()
+    self.__init_loss_module()
 
     self.current_epoch = 1
 
@@ -138,6 +143,16 @@ class Recoder(object):
     self.val_dataloader = DataLoader(self.val_dataset, batch_size=self.batch_size,
                                      shuffle=True, collate_fn=collate_fn,
                                      num_workers=self.num_data_workers)
+
+  def __init_loss_module(self):
+    if self.loss == 'logistic':
+      self.loss_module = BCEWithLogitsLoss(size_average=False, **self.loss_params)
+    elif self.loss == 'mse':
+      self.loss_module = MSELoss(size_average=False, **self.loss_params)
+    elif self.loss == 'logloss':
+      self.loss_module = MultinomialNLLLoss(size_average=False)
+    else:
+      raise ValueError('Unknown loss function {}'.format(self.loss))
 
   def __init_optimizer(self):
     params = []
@@ -222,7 +237,7 @@ class Recoder(object):
     log.info('Weight decay: {}'.format(self.weight_decay))
     log.info('Batch Size: {}'.format(self.batch_size))
     log.info('Optimizer: {}'.format(self.optimizer_type))
-    log.info('Loss Function: {}'.format(self.loss_module_name))
+    log.info('Loss Function: {}'.format(self.loss))
 
     for epoch in range(self.current_epoch, self.num_epochs + 1):
       self.current_epoch = epoch
@@ -251,10 +266,9 @@ class Recoder(object):
 
         if (itr + 1) % summary_frequency == 0:
           aggregated_losses.append(loss.item())
-          log.info('[%d, %5d] %s: %.7f' % (epoch, itr + 1, self.loss_module_name, aggregated_losses[-1]))
+          log.info('[%d, %5d] %s: %.7f' % (epoch, itr + 1, self.loss, aggregated_losses[-1]))
 
-      log.info('Taining average {} loss: {}'.format(self.loss_module_name,
-                                                    np.mean(aggregated_losses)))
+      log.info('Taining average {} loss: {}'.format(self.loss, np.mean(aggregated_losses)))
 
       if epoch % val_epoch_freq == 0 or epoch == self.num_epochs:
         self.validate()
