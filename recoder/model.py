@@ -27,7 +27,8 @@ class Recoder(object):
     model_file (str, optional): the model file. required in 'model' model. and used to continue training
       in 'train' mode.
     hidden_layers (list, optional): Autoencoder hidden layers sizes. required in 'train' mode.
-    model_params (dict, optional): the Autoencoder model extra parameters other than layer_sizes.
+    model_params (dict, optional): the Autoencoder model extra parameters other than `layer_sizes`,
+      and `last_layer_act`.
     train_dataset (RecommendationDataset, optional): train dataset. required in 'train' mode.
     val_dataset (RecommendationDataset, optional): validation dataset. required in 'train' mode.
     use_cuda (bool, optional): use GPU on training/evaluation the model.
@@ -101,6 +102,7 @@ class Recoder(object):
     layer_sizes = [self.vector_dim] + self.hidden_layers
 
     self.autoencoder = DynamicAutoencoder(layer_sizes=layer_sizes,
+                                          last_layer_act='none',
                                           **self.model_params)
 
     if not self._model_saved_state is None:
