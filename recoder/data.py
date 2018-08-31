@@ -94,9 +94,12 @@ class RecommendationDataset(Dataset):
       target_index = self.target_dataset.__groups_index[_group]
       target_interactions = self.target_dataset.__get_interactions(target_index)
     else:
-      target_interactions = interactions
+      target_interactions = None
 
-    return interactions, target_interactions
+    if target_interactions is None:
+      return interactions
+    else:
+      return interactions, target_interactions
 
   def preload(self):
     """
