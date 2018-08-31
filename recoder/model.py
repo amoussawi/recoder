@@ -249,20 +249,25 @@ class Recoder(object):
       aggregated_losses = []
       self.lr_scheduler.step()
       log.info('Epoch Learning Rate: {}'.format(self.lr_scheduler.get_lr()[0]))
-      for itr, ((input, input_words), (target, target_words)) in enumerate(self.train_dataloader):
+      for itr, (input, target) in enumerate(self.train_dataloader):
         self.optimizer.zero_grad()
 
-        input = input.to(device=self.device)
-        target = target.to(device=self.device)
+        # building the sparse tensor from
+        input_idx, input_val, input_size, input_words = input
+        target_idx, target_val, target_size, target_words = target
+        input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size)\
+          .to(device=self.device).to_dense()
+        target_dense = torch.sparse.FloatTensor(target_idx, target_val, target_size)\
+          .to(device=self.device).to_dense()
         if input_words is not None:
           input_words = input_words.to(device=self.device)
         if target_words is not None:
           target_words = target_words.to(device=self.device)
 
-        output = self.autoencoder(input, input_words=input_words,
+        output = self.autoencoder(input_dense, input_words=input_words,
                                   target_words=target_words)
 
-        loss = self.compute_loss(output, target)
+        loss = self.compute_loss(output, target_dense)
 
         loss.backward()
         self.optimizer.step()
@@ -289,19 +294,22 @@ class Recoder(object):
     total_loss = 0.0
     num_batches = 1
 
-    for itr, ((input, input_words), (target, target_words)) in enumerate(self.val_dataloader):
+    for itr, (input, target) in enumerate(self.val_dataloader):
 
-      input = input.to(device=self.device)
-      target = target.to(device=self.device)
+      input_idx, input_val, input_size, input_words = input
+      target_idx, target_val, target_size, target_words = target
+      input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
+        .to(device=self.device).to_dense()
+      target_dense = torch.sparse.FloatTensor(target_idx, target_val, target_size).to(device=self.device).to_dense()
       if input_words is not None:
         input_words = input_words.to(device=self.device)
       if target_words is not None:
         target_words = target_words.to(device=self.device)
 
-      output = self.autoencoder(input, input_words=input_words,
+      output = self.autoencoder(input_dense, input_words=input_words,
                                 target_words=target_words)
 
-      loss = self.compute_loss(output, target)
+      loss = self.compute_loss(output, target_dense)
       total_loss += loss.item()
       num_batches = itr + 1
 
@@ -367,20 +375,18 @@ class Recoder(object):
       _vector_dim = self.vector_dim
       active_cols = None
 
-    ind_lt = torch.LongTensor([samples_inds, inter_inds])
-    val_ft = torch.FloatTensor(inter_vals)
+    indices = torch.LongTensor([samples_inds, inter_inds])
+    values = torch.FloatTensor(inter_vals)
 
-    batch = torch.sparse.FloatTensor(ind_lt, val_ft, torch.Size([batch_size, _vector_dim]))
-
-    batch = batch.to_dense()
-    return batch, active_cols
+    return indices, values, torch.Size([batch_size, _vector_dim]), active_cols
 
   def predict(self, users_hist, return_input=False):
-    (input, input_words), _ = self.__collate_batch(list(zip(users_hist, users_hist)),
-                                                   with_ns=False)
-    input = input.to(device=self.device)
-    output = self.autoencoder(input, full_output=True).cpu()
-    return output, input.cpu() if return_input else output
+    input, _ = self.__collate_batch(users_hist, with_ns=False)
+    input_idx, input_val, input_size, input_words = input
+    input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
+      .to(device=self.device).to_dense()
+    output = self.autoencoder(input_dense, full_output=True).cpu()
+    return output, input_dense.cpu() if return_input else output
 
   def evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
     """
