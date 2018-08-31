@@ -15,6 +15,7 @@ from recoder.metrics import RecommenderEvaluator
 from recoder.nn import DynamicAutoencoder
 from recoder.recommender import InferenceRecommender
 from recoder.nn import MSELoss, MultinomialNLLLoss
+import recoder.utils as utils
 
 
 class Recoder(object):
@@ -315,12 +316,17 @@ class Recoder(object):
     return loss
 
   def __collate_batch(self, batch, with_ns=True):
-    _input_batch = [i for i, t in batch]
-    _target_batch = [t for d, t in batch]
+    if type(batch[0]) is tuple:
+      # then we have (input, target)
+      _input_batch, _target_batch = utils.unzip(batch)
+    else:
+      # in that case the target is the same as the input
+      _input_batch = batch
+      _target_batch = None
 
     input = self.__collate_interactions_batch(_input_batch, with_ns=with_ns)
 
-    if _input_batch[0] is _target_batch[0]: # If target is input no need to re-compute
+    if _target_batch is None:
       target = input
     else:
       target = self.__collate_interactions_batch(_target_batch, with_ns=with_ns)
