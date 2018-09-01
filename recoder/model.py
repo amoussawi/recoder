@@ -86,7 +86,6 @@ class Recoder(object):
       self.device = torch.device('cpu')
 
     self._model_saved_state = None
-    self.user_id_map = None
     self.item_id_map = None
 
     if model_file is not None:
@@ -123,9 +122,6 @@ class Recoder(object):
   def __init_training(self):
     self.users = list(set(self.train_dataset.users + self.val_dataset.users))
     self.items = list(set(self.train_dataset.items + self.val_dataset.items))
-
-    if self.user_id_map is None:
-      self.__build_user_map()
 
     if self.index_item_ids:
       self.vector_dim = len(self.items)
@@ -199,16 +195,10 @@ class Recoder(object):
     self.hidden_layers = self._model_saved_state['hidden_layers']
     self.model_params = self._model_saved_state['model_params']
     self.item_id_map = self._model_saved_state['item_id_map']
-    self.user_id_map = self._model_saved_state['user_id_map']
     self.current_epoch = self._model_saved_state['last_epoch']
     self.model_state_dict = self._model_saved_state['model']
     self.optimizer_state_dict = self._model_saved_state['optimizer']
     self.vector_dim = self._model_saved_state['vector_dim']
-
-  def __build_user_map(self):
-    self.user_id_map = {}
-    for user_id, user in enumerate(self.users):
-      self.user_id_map[user] = user_id
 
   def __build_item_map(self):
     self.item_id_map = {}
@@ -222,7 +212,6 @@ class Recoder(object):
       'vector_dim': self.vector_dim,
       'hidden_layers': self.hidden_layers,
       'model_params': self.model_params,
-      'user_id_map': self.user_id_map,
       'item_id_map': self.item_id_map,
       'last_epoch': self.current_epoch,
       'model': self.autoencoder.state_dict(),
