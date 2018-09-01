@@ -47,13 +47,19 @@ class Recoder(object):
       If `-1`, then all possible negative items will be sampled. If `0`, only the positive items from
       the other examples in the mini-batch will be sampled. If `> 0`, then `num_neg_samples` samples
       will be randomly sampled including the negative items from the other examples in the mini-batch.
+    index_item_ids (bool, optional): If `True`, the item ids will be indexed. Used when the item ids
+      are strings, or integers but don't start with 0 and can have values much larger than the total
+      number of items in the dataset. The item ids index is provided by accessing `Recoder.item_id_map`,
+      which maps from original item id to the new item id. If `False`, the item ids in the dataset
+      should be integers, and the number of items will be equal to `max(item_ids) + 1` assuming item
+      ids start with 0. Note: indexing the item ids can slightly slow the training process.
   """
 
   def __init__(self, mode, model_file=None, hidden_layers=None, model_params=None,
                train_dataset=None, val_dataset=None, use_cuda=False,
                optimizer_type='sgd', lr=0.001, weight_decay=0, num_epochs=1,
                loss='mse', loss_params=None, batch_size=64, optimizer_lr_milestones=None,
-               num_neg_samples=0, num_data_workers=0):
+               num_neg_samples=0, num_data_workers=0, index_item_ids=True):
 
     self.mode = mode
     self.model_file = model_file
@@ -72,6 +78,7 @@ class Recoder(object):
     self.use_cuda = use_cuda
     self.num_neg_samples = num_neg_samples
     self.num_data_workers = num_data_workers
+    self.index_item_ids = index_item_ids
 
     if self.use_cuda:
       self.device = torch.device('cuda')
@@ -117,13 +124,16 @@ class Recoder(object):
     self.users = list(set(self.train_dataset.users + self.val_dataset.users))
     self.items = list(set(self.train_dataset.items + self.val_dataset.items))
 
-    self.vector_dim = len(self.items)
-
     if self.user_id_map is None:
       self.__build_user_map()
 
-    if self.item_id_map is None:
-      self.__build_item_map()
+    if self.index_item_ids:
+      self.vector_dim = len(self.items)
+      if self.item_id_map is None:
+        self.__build_item_map()
+    else:
+      assert type(self.items[0]) is int, 'item ids should be integers or set index_item_ids to True'
+      self.vector_dim = int(np.max(self.items)) + 1
 
     self.__init_model()
     self.__init_optimizer()
@@ -350,9 +360,11 @@ class Recoder(object):
     for sample_i, user_inters in enumerate(batch):
       num_inters = len(user_inters)
       samples_inds.extend([sample_i] * num_inters)
-      for item, inter_val in user_inters:
-        inter_inds.append(self.item_id_map[item])
-        inter_vals.append(inter_val)
+      _inter_inds, _inter_vals = utils.unzip(user_inters)
+      if self.index_item_ids:
+        _inter_inds = map(lambda item_id: self.item_id_map[item_id], _inter_inds)
+      inter_inds.extend(_inter_inds)
+      inter_vals.extend(_inter_vals)
 
     if self.num_neg_samples >= 0 and with_ns:
       negative_items = np.random.randint(0, self.vector_dim, self.num_neg_samples)
