@@ -363,9 +363,9 @@ class Recoder(object):
       # It's enough to fill the first sample in the batch with negative items
       # the others will be filled by transforming the sparse matrix into dense
       if num_negative_items > 0:
-        samples_inds.extend(np.repeat(0, num_negative_items))
+        samples_inds.extend([0] * num_negative_items)
         inter_inds.extend(negative_items)
-        inter_vals.extend(np.repeat(0, num_negative_items))
+        inter_vals.extend([0] * num_negative_items)
 
       active_columns_ordered = np.unique(inter_inds)
       new_map = dict([(v, ind) for ind, v in enumerate(active_columns_ordered)])
