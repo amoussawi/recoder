@@ -107,10 +107,11 @@ class Recoder(object):
 
   def __init_model(self):
     layer_sizes = [self.vector_dim] + self.hidden_layers
-
+    _model_params = dict(self.model_params)
+    _model_params.pop('last_layer_act', None) # ignore last_layer_act param if it was passed
     self.autoencoder = DynamicAutoencoder(layer_sizes=layer_sizes,
                                           last_layer_act='none',
-                                          **self.model_params)
+                                          **_model_params)
 
     if not self._model_saved_state is None:
       self.autoencoder.load_state_dict(self._model_saved_state['model'])
