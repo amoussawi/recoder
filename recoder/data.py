@@ -1,8 +1,7 @@
 from torch.utils.data import Dataset
 
-import numpy as np
-
 import collections
+from concurrent.futures import ProcessPoolExecutor
 
 
 __Interaction = collections.namedtuple('__Interaction', ['item_id', 'inter'])
@@ -18,89 +17,89 @@ class Interaction(__Interaction):
   pass
 
 
+def _dataframe_to_interactions(dataframe, user_col='user',
+                               item_col='item', inter_col='inter'):
+  grouped_data_df = dataframe.groupby(by=user_col)
+
+  users = list(grouped_data_df.groups.keys())
+
+  interactions = {}
+
+  for user in users:
+    user_data = grouped_data_df.get_group(user)
+    interactions[user] = [Interaction(item_id, inter)
+                          for item_id, inter in zip(user_data[item_col], user_data[inter_col])]
+
+  return interactions
+
+
 class RecommendationDataset(Dataset):
   """
-  Represents a ``Dataset`` that iterates through the users interactions with items.
+  Represents a ``torch.utils.data.Dataset`` that iterates through the users interactions with items.
 
-  Indexing the dataset will return a tuple of the user input and target list of ``Interaction``.
-  In case a ``target_dataset`` was not provided, which is usually the case for training,
-  the target is the same as input, otherwise the target is the user interactions in the ``target_dataset``.
+  If a ``target_dataset`` is provided, indexing the dataset will return a tuple of the user input
+  and target list of ``Interaction``, otherwise only the input list of ``Interaction`` is returned.
 
   Args:
-    data (pandas.DataFrame): DataFrame that contains user-item interactions
     target_dataset (RecommendationDataset, optional): RecommendationDataset that contains
       the interactions to recommend.
-    user_col (str, optional): user column name
-    item_col (str, optional): item column name
-    inter_col (str, optional): interaction column name
   """
 
-  def __init__(self, data, target_dataset=None,
-               user_col='user', item_col='item', inter_col='inter'):
-
-    self.data = data
-
-    self.user_col = user_col
-    self.item_col = item_col
-    self.inter_col = inter_col
+  def __init__(self, target_dataset=None):
     self.target_dataset = target_dataset # type: RecommendationDataset
+    self.__interactions = {}
+    self.users = []
+    self.items = []
 
-    self.__load_data()
+  def fill_from_dataframe(self, dataframe, num_workers=0,
+                          user_col='user', item_col='item',
+                          inter_col='inter'):
+    """
+    Fills the dataset from a ``pandas.DataFrame`` where each row represents an interaction
+    between a user and an item and the value of that interaction.
 
-  def __load_data(self):
-    self.users = self.data[self.user_col].unique().tolist()
-    self.items = self.data[self.item_col].unique().tolist()
+    Args:
+      dataframe (pandas.DataFrame): DataFrame that contains user-item interactions
+      num_workers (int, optional): Number of workers to use to fill the data
+      user_col (str, optional): user column name
+      item_col (str, optional): item column name
+      inter_col (str, optional): interaction value column name
+    """
+    dataframe_users = dataframe[user_col].unique().tolist()
+    dataframe_items = dataframe[item_col].unique().tolist()
+    self.users = list(set(self.users + dataframe_users))
+    self.items = list(set(self.items + dataframe_items))
 
-    if self.target_dataset is not None:
-      self.users = list(set(self.users + self.target_dataset.users))
-      self.items = list(set(self.items + self.target_dataset.items))
+    if num_workers > 0:
+      pool_exec = ProcessPoolExecutor(num_workers)
+      futures = []
+      chunk_size = int(len(dataframe_users) / num_workers) + 1
+      users_chunks = [dataframe_users[offset:offset + chunk_size]
+                      for offset in range(0, len(dataframe_users), chunk_size)]
 
-    _grouped_data_df = self.data.groupby(by=self.user_col)
+      for users_chunk in users_chunks:
+        dataframe_chunk = dataframe[dataframe[user_col].isin(users_chunk)]
+        futures.append(pool_exec.submit(_dataframe_to_interactions, dataframe_chunk,
+                                        user_col=user_col, item_col=item_col,
+                                        inter_col=inter_col))
 
-    if self.target_dataset is None:
-      self.__groups = list(_grouped_data_df.groups.keys())
+      for future in futures:
+        self.__interactions.update(future.result())
+
+      pool_exec.shutdown()
     else:
-      _groups = list(_grouped_data_df.groups.keys())
-      # to avoid having groups not in the target dataset
-      self.__groups = list(np.intersect1d(_groups, self.target_dataset.__groups))
-
-    self.__groups_index = {g:i for i, g in enumerate(self.__groups)}
-    self.__grouped_data = _grouped_data_df
-
-    self.__interactions = [-1] * len(self.__groups)
-
-  def __get_interactions(self, index):
-    if self.__interactions[index] != -1:
-      return self.__interactions[index]
-
-    group = self.__groups[index]
-    _data = self.__grouped_data.get_group(group)
-
-    interactions = []
-    for item_id, inter in zip(_data[self.item_col], _data[self.inter_col]):
-      interactions.append(Interaction(item_id=item_id, inter=inter))
-
-    self.__interactions[index] = interactions
-    return interactions
+      self.__interactions.update(_dataframe_to_interactions(dataframe, user_col=user_col,
+                                                            item_col=item_col, inter_col=inter_col))
 
   def __len__(self):
-    return len(self.__interactions)
+    return len(self.users)
 
   def __getitem__(self, index):
-    interactions = self.__get_interactions(index)
+    if index >= len(self):
+      raise IndexError(index)
 
-    if self.target_dataset is not None:
-      _group = self.__groups[index]
-      target_index = self.target_dataset.__groups_index[_group]
-      target_interactions = self.target_dataset.__get_interactions(target_index)
+    user = self.users[index]
+    if self.target_dataset is None:
+      return self.__interactions[user]
     else:
-      target_interactions = interactions
-
-    return interactions, target_interactions
-
-  def preload(self):
-    """
-    Preloads the data into memory
-    """
-    for i in range(len(self)):
-      self[i]
+      return self.__interactions[user], self.target_dataset.__interactions[user]

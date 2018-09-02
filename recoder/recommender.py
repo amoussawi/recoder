@@ -107,7 +107,10 @@ class InferenceRecommender(Recommender):
                num_recommendations):
     self.model = model
     self.num_recommendations = num_recommendations
-    self.item_id_inverse_map = dict([(v,k) for k,v in model.item_id_map.items()])
+    if self.model.item_id_map is None:
+      self.item_id_inverse_map = None
+    else:
+      self.item_id_inverse_map = dict([(v,k) for k,v in model.item_id_map.items()])
 
   def recommend(self, users_hist):
     output, input = self.model.predict(users_hist, return_input=True)
@@ -124,8 +127,10 @@ class InferenceRecommender(Recommender):
 
     top_sorted_ind = top_ind[np.arange(top_ind.shape[0])[:, None], top_sorted_reset_ind]
 
-    item_id_mapper = np.vectorize(lambda item_id: self.item_id_inverse_map[item_id])
-
-    recommendations = item_id_mapper(top_sorted_ind)
+    if self.item_id_inverse_map is not None:
+      item_id_mapper = np.vectorize(lambda item_id: self.item_id_inverse_map[item_id])
+      recommendations = item_id_mapper(top_sorted_ind)
+    else:
+      recommendations = top_sorted_ind.tolist()
 
     return recommendations

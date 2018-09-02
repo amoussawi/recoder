@@ -15,6 +15,7 @@ from recoder.metrics import RecommenderEvaluator
 from recoder.nn import DynamicAutoencoder
 from recoder.recommender import InferenceRecommender
 from recoder.nn import MSELoss, MultinomialNLLLoss
+import recoder.utils as utils
 
 
 class Recoder(object):
@@ -46,13 +47,19 @@ class Recoder(object):
       If `-1`, then all possible negative items will be sampled. If `0`, only the positive items from
       the other examples in the mini-batch will be sampled. If `> 0`, then `num_neg_samples` samples
       will be randomly sampled including the negative items from the other examples in the mini-batch.
+    index_item_ids (bool, optional): If `True`, the item ids will be indexed. Used when the item ids
+      are strings, or integers but don't start with 0 and can have values much larger than the total
+      number of items in the dataset. The item ids index is provided by accessing `Recoder.item_id_map`,
+      which maps from original item id to the new item id. If `False`, the item ids in the dataset
+      should be integers, and the number of items will be equal to `max(item_ids) + 1` assuming item
+      ids start with 0. Note: indexing the item ids can slightly slow the training process.
   """
 
   def __init__(self, mode, model_file=None, hidden_layers=None, model_params=None,
                train_dataset=None, val_dataset=None, use_cuda=False,
                optimizer_type='sgd', lr=0.001, weight_decay=0, num_epochs=1,
                loss='mse', loss_params=None, batch_size=64, optimizer_lr_milestones=None,
-               num_neg_samples=0, num_data_workers=0):
+               num_neg_samples=0, num_data_workers=0, index_item_ids=True):
 
     self.mode = mode
     self.model_file = model_file
@@ -71,6 +78,7 @@ class Recoder(object):
     self.use_cuda = use_cuda
     self.num_neg_samples = num_neg_samples
     self.num_data_workers = num_data_workers
+    self.index_item_ids = index_item_ids
 
     if self.use_cuda:
       self.device = torch.device('cuda')
@@ -78,7 +86,6 @@ class Recoder(object):
       self.device = torch.device('cpu')
 
     self._model_saved_state = None
-    self.user_id_map = None
     self.item_id_map = None
 
     if model_file is not None:
@@ -100,10 +107,11 @@ class Recoder(object):
 
   def __init_model(self):
     layer_sizes = [self.vector_dim] + self.hidden_layers
-
+    _model_params = dict(self.model_params)
+    _model_params.pop('last_layer_act', None) # ignore last_layer_act param if it was passed
     self.autoencoder = DynamicAutoencoder(layer_sizes=layer_sizes,
                                           last_layer_act='none',
-                                          **self.model_params)
+                                          **_model_params)
 
     if not self._model_saved_state is None:
       self.autoencoder.load_state_dict(self._model_saved_state['model'])
@@ -116,13 +124,13 @@ class Recoder(object):
     self.users = list(set(self.train_dataset.users + self.val_dataset.users))
     self.items = list(set(self.train_dataset.items + self.val_dataset.items))
 
-    self.vector_dim = len(self.items)
-
-    if self.user_id_map is None:
-      self.__build_user_map()
-
-    if self.item_id_map is None:
-      self.__build_item_map()
+    if self.index_item_ids:
+      self.vector_dim = len(self.items)
+      if self.item_id_map is None:
+        self.__build_item_map()
+    else:
+      assert type(self.items[0]) is int, 'item ids should be integers or set index_item_ids to True'
+      self.vector_dim = int(np.max(self.items)) + 1
 
     self.__init_model()
     self.__init_optimizer()
@@ -188,16 +196,10 @@ class Recoder(object):
     self.hidden_layers = self._model_saved_state['hidden_layers']
     self.model_params = self._model_saved_state['model_params']
     self.item_id_map = self._model_saved_state['item_id_map']
-    self.user_id_map = self._model_saved_state['user_id_map']
     self.current_epoch = self._model_saved_state['last_epoch']
     self.model_state_dict = self._model_saved_state['model']
     self.optimizer_state_dict = self._model_saved_state['optimizer']
     self.vector_dim = self._model_saved_state['vector_dim']
-
-  def __build_user_map(self):
-    self.user_id_map = {}
-    for user_id, user in enumerate(self.users):
-      self.user_id_map[user] = user_id
 
   def __build_item_map(self):
     self.item_id_map = {}
@@ -211,7 +213,6 @@ class Recoder(object):
       'vector_dim': self.vector_dim,
       'hidden_layers': self.hidden_layers,
       'model_params': self.model_params,
-      'user_id_map': self.user_id_map,
       'item_id_map': self.item_id_map,
       'last_epoch': self.current_epoch,
       'model': self.autoencoder.state_dict(),
@@ -248,20 +249,25 @@ class Recoder(object):
       aggregated_losses = []
       self.lr_scheduler.step()
       log.info('Epoch Learning Rate: {}'.format(self.lr_scheduler.get_lr()[0]))
-      for itr, ((input, input_words), (target, target_words)) in enumerate(self.train_dataloader):
+      for itr, (input, target) in enumerate(self.train_dataloader):
         self.optimizer.zero_grad()
 
-        input = input.to(device=self.device)
-        target = target.to(device=self.device)
+        # building the sparse tensor from
+        input_idx, input_val, input_size, input_words = input
+        target_idx, target_val, target_size, target_words = target
+        input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size)\
+          .to(device=self.device).to_dense()
+        target_dense = torch.sparse.FloatTensor(target_idx, target_val, target_size)\
+          .to(device=self.device).to_dense()
         if input_words is not None:
           input_words = input_words.to(device=self.device)
         if target_words is not None:
           target_words = target_words.to(device=self.device)
 
-        output = self.autoencoder(input, input_words=input_words,
+        output = self.autoencoder(input_dense, input_words=input_words,
                                   target_words=target_words)
 
-        loss = self.compute_loss(output, target)
+        loss = self.compute_loss(output, target_dense)
 
         loss.backward()
         self.optimizer.step()
@@ -288,19 +294,22 @@ class Recoder(object):
     total_loss = 0.0
     num_batches = 1
 
-    for itr, ((input, input_words), (target, target_words)) in enumerate(self.val_dataloader):
+    for itr, (input, target) in enumerate(self.val_dataloader):
 
-      input = input.to(device=self.device)
-      target = target.to(device=self.device)
+      input_idx, input_val, input_size, input_words = input
+      target_idx, target_val, target_size, target_words = target
+      input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
+        .to(device=self.device).to_dense()
+      target_dense = torch.sparse.FloatTensor(target_idx, target_val, target_size).to(device=self.device).to_dense()
       if input_words is not None:
         input_words = input_words.to(device=self.device)
       if target_words is not None:
         target_words = target_words.to(device=self.device)
 
-      output = self.autoencoder(input, input_words=input_words,
+      output = self.autoencoder(input_dense, input_words=input_words,
                                 target_words=target_words)
 
-      loss = self.compute_loss(output, target)
+      loss = self.compute_loss(output, target_dense)
       total_loss += loss.item()
       num_batches = itr + 1
 
@@ -315,12 +324,17 @@ class Recoder(object):
     return loss
 
   def __collate_batch(self, batch, with_ns=True):
-    _input_batch = [i for i, t in batch]
-    _target_batch = [t for d, t in batch]
+    if type(batch[0]) is tuple:
+      # then we have (input, target)
+      _input_batch, _target_batch = utils.unzip(batch)
+    else:
+      # in that case the target is the same as the input
+      _input_batch = batch
+      _target_batch = None
 
     input = self.__collate_interactions_batch(_input_batch, with_ns=with_ns)
 
-    if _input_batch[0] is _target_batch[0]: # If target is input no need to re-compute
+    if _target_batch is None:
       target = input
     else:
       target = self.__collate_interactions_batch(_target_batch, with_ns=with_ns)
@@ -336,9 +350,11 @@ class Recoder(object):
     for sample_i, user_inters in enumerate(batch):
       num_inters = len(user_inters)
       samples_inds.extend([sample_i] * num_inters)
-      for item, inter_val in user_inters:
-        inter_inds.append(self.item_id_map[item])
-        inter_vals.append(inter_val)
+      _inter_inds, _inter_vals = utils.unzip(user_inters)
+      if self.index_item_ids:
+        _inter_inds = map(lambda item_id: self.item_id_map[item_id], _inter_inds)
+      inter_inds.extend(_inter_inds)
+      inter_vals.extend(_inter_vals)
 
     if self.num_neg_samples >= 0 and with_ns:
       negative_items = np.random.randint(0, self.vector_dim, self.num_neg_samples)
@@ -348,9 +364,9 @@ class Recoder(object):
       # It's enough to fill the first sample in the batch with negative items
       # the others will be filled by transforming the sparse matrix into dense
       if num_negative_items > 0:
-        samples_inds.extend(np.repeat(0, num_negative_items))
+        samples_inds.extend([0] * num_negative_items)
         inter_inds.extend(negative_items)
-        inter_vals.extend(np.repeat(0, num_negative_items))
+        inter_vals.extend([0] * num_negative_items)
 
       active_columns_ordered = np.unique(inter_inds)
       new_map = dict([(v, ind) for ind, v in enumerate(active_columns_ordered)])
@@ -361,20 +377,18 @@ class Recoder(object):
       _vector_dim = self.vector_dim
       active_cols = None
 
-    ind_lt = torch.LongTensor([samples_inds, inter_inds])
-    val_ft = torch.FloatTensor(inter_vals)
+    indices = torch.LongTensor([samples_inds, inter_inds])
+    values = torch.FloatTensor(inter_vals)
 
-    batch = torch.sparse.FloatTensor(ind_lt, val_ft, torch.Size([batch_size, _vector_dim]))
-
-    batch = batch.to_dense()
-    return batch, active_cols
+    return indices, values, torch.Size([batch_size, _vector_dim]), active_cols
 
   def predict(self, users_hist, return_input=False):
-    (input, input_words), _ = self.__collate_batch(list(zip(users_hist, users_hist)),
-                                                   with_ns=False)
-    input = input.to(device=self.device)
-    output = self.autoencoder(input, full_output=True).cpu()
-    return output, input.cpu() if return_input else output
+    input, _ = self.__collate_batch(users_hist, with_ns=False)
+    input_idx, input_val, input_size, input_words = input
+    input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
+      .to(device=self.device).to_dense()
+    output = self.autoencoder(input_dense, full_output=True).cpu()
+    return output, input_dense.cpu() if return_input else output
 
   def evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
     """
