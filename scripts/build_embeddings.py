@@ -18,7 +18,8 @@ def build_embeddings_first_layer(model):
   return model.autoencoder.en_embedding_layer.weight.data
 
 model_file = 'models/ml-20m/bce_ns_d_0.0_n_0.5_200_epoch_100.model'
-model = Recoder(mode='model', model_file=model_file)
+model = Recoder()
+model.init_from_model_file(model_file)
 
 index = AnnoyEmbeddingsIndex(embeddings=build_embeddings_first_layer(model),
                              index_file=model_file+'.index', id_map=model.item_id_map)
