@@ -5,8 +5,19 @@ import torch.nn.functional as F
 
 def activation(x, act):
   if act == 'none': return x
-  func = getattr(torch.nn.functional, act)
+  func = getattr(torch, act)
   return func(x)
+
+
+def _reduce(x, reduction='elementwise_mean'):
+  if reduction is 'none':
+    return x
+  elif reduction is 'elementwise_mean':
+    return x.mean()
+  elif reduction is 'sum':
+    return x.sum()
+  else:
+    raise ValueError('No such reduction {} defined'.format(reduction))
 
 
 class DynamicAutoencoder(nn.Module):
@@ -216,23 +227,22 @@ class MSELoss(nn.Module):
 
   Args:
     confidence (float, optional): the weighting of positive observations.
-    size_average (bool, optional): whether to average the loss over the number observations in the
-      input tensors
+    reduction (string, optional): Specifies the reduction to apply to the output:
+        'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+        'elementwise_mean': the sum of the output will be divided by the number of
+        elements in the output, 'sum': the output will be summed. Default: 'elementwise_mean'
   """
 
-  def __init__(self, confidence=0, size_average=True):
+  def __init__(self, confidence=0, reduction='elementwise_mean'):
     super(MSELoss, self).__init__()
-    self.size_average = size_average
+    self.reduction = reduction
     self.confidence = confidence
 
   def forward(self, input, target):
     weights = 1 + self.confidence * (target > 0).float()
-    loss = F.mse_loss(input, target, reduce=False)
+    loss = F.mse_loss(input, target, reduction='none')
     weighted_loss = weights * loss
-    if self.size_average:
-      return weighted_loss.mean()
-    else:
-      return weighted_loss.sum()
+    return _reduce(weighted_loss, reduction=self.reduction)
 
 
 class MultinomialNLLLoss(nn.Module):
@@ -243,21 +253,17 @@ class MultinomialNLLLoss(nn.Module):
     \ell(x, y) = L = - y \cdot \log(softmax(x))
 
   Args:
-    size_average (bool, optional): whether to average the loss over the number observations in the
-      input tensors
+    reduction (string, optional): Specifies the reduction to apply to the output:
+        'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+        'elementwise_mean': the sum of the output will be divided by the number of
+        elements in the output, 'sum': the output will be summed. Default: 'elementwise_mean'
   """
 
-  def __init__(self, size_average=True):
+  def __init__(self, reduction='elementwise_mean'):
     super(MultinomialNLLLoss, self).__init__()
-    self.size_average = size_average
+    self.reduction = reduction
 
   def forward(self, input, target):
     loss = - target * F.log_softmax(input, dim=1)
-    loss = loss.sum()
 
-    if self.size_average:
-      loss = loss.mean()
-    else:
-      loss = loss.sum()
-
-    return loss
+    return _reduce(loss, reduction=self.reduction)

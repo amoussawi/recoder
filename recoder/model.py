@@ -88,11 +88,11 @@ class Recoder(object):
 
   def __init_loss_module(self):
     if self.loss == 'logistic':
-      self.loss_module = BCEWithLogitsLoss(size_average=False, **self.loss_params)
+      self.loss_module = BCEWithLogitsLoss(reduction='sum', **self.loss_params)
     elif self.loss == 'mse':
-      self.loss_module = MSELoss(size_average=False, **self.loss_params)
+      self.loss_module = MSELoss(reduction='sum', **self.loss_params)
     elif self.loss == 'logloss':
-      self.loss_module = MultinomialNLLLoss(size_average=False)
+      self.loss_module = MultinomialNLLLoss(reduction='sum')
     else:
       raise ValueError('Unknown loss function {}'.format(self.loss))
 
