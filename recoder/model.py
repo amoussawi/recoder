@@ -150,6 +150,16 @@ class Recoder(object):
     self.autoencoder.load_state_dict(model_saved_state['model'])
 
   def save_state(self, model_checkpoint_prefix):
+    """
+    Saves the model state in the path starting with ``model_checkpoint_prefix`` and appending it
+    with the model current training epoch
+
+    Args:
+      model_checkpoint_prefix (str): the model save path prefix
+
+    Returns:
+      the model state file path
+    """
     checkpoint_file = "{}_epoch_{}.model".format(model_checkpoint_prefix, self.current_epoch)
     log.info("Saving model to {}".format(checkpoint_file))
     current_state = {
@@ -217,9 +227,10 @@ class Recoder(object):
       batch_size (int, optional): batch size
       lr_milestones (list, optional): optimizer learning rate epochs milestones (0.1 decay).
       num_neg_samples (int, optional): number of negative samples to generate for each user.
-        If `-1`, then all possible negative items will be sampled. If `0`, only the positive items from
-        the other examples in the mini-batch will be sampled. If `> 0`, then `num_neg_samples` samples
-        will be randomly sampled including the negative items from the other examples in the mini-batch.
+        If `-1`, then all possible negative items will be sampled. If `0`, the negative items
+        are sampled with mini-batch based negative sampling. If `> 0`, the negative items
+        are sampled with mini-batch based negative sampling in addition to common random negative
+        items if needed.
       num_data_workers (int, optional): number of data workers to use for building the mini-batches.
       model_checkpoint_prefix (str, optional): model checkpoint save path prefix
       checkpoint_freq (int, optional): epochs frequency of saving a checkpoint the model
@@ -435,6 +446,17 @@ class Recoder(object):
     return indices, values, torch.Size([batch_size, _vector_dim]), active_cols
 
   def predict(self, users_hist, return_input=False):
+    """
+    Predicts the user interactions with all items
+
+    Args:
+      users_hist (list): A batch of users list of ``Interaction``
+      return_input (bool, optional): whether to return the dense input batch
+
+    Returns:
+      if ``return_input`` is ``True`` a tuple of the predictions and the input batch
+      is returned, otherwise only the predictions are returned
+    """
     if self.autoencoder is None:
       raise Exception('Model not initialized.')
 
