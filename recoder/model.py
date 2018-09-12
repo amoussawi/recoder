@@ -14,7 +14,7 @@ from recoder.data import RecommendationDataset
 from recoder.metrics import RecommenderEvaluator
 from recoder.nn import DynamicAutoencoder
 from recoder.recommender import InferenceRecommender
-from recoder.nn import MSELoss, MultinomialNLLLoss
+from recoder.losses import MSELoss, MultinomialNLLLoss
 import recoder.utils as utils
 
 from tqdm import tqdm
