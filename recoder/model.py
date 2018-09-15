@@ -32,10 +32,13 @@ class Recoder(object):
       and `last_layer_act`.
     use_cuda (bool, optional): use GPU on training/evaluation the model.
     optimizer_type (str, optional): optimizer type (one of 'sgd', 'adam', 'adagrad', 'rmsprop').
-    loss (str, optional): loss function used to train the model.
-      'mse' for `recoder.nn.MSELoss`, 'logistic' for `torch.nn.BCEWithLogitsLoss`,
-      and 'logloss' for `recoder.nn.MultinomialNLLLoss`
-    loss_params (dict, optional): loss function extra params based on loss module.
+    loss (str or torch.nn.Module, optional): loss function used to train the model.
+      If loss is a ``str``, it should be `mse` for ``recoder.losses.MSELoss``, `logistic` for
+      ``torch.nn.BCEWithLogitsLoss``, or `logloss` for ``recoder.losses.MultinomialNLLLoss``. If ``loss``
+      is a ``torch.nn.Module``, then that Module will be used as a loss function and make sure that
+      the loss reduction is a sum reduction and not an elementwise mean.
+    loss_params (dict, optional): loss function extra params based on loss module if ``loss`` is a ``str``.
+      Ignored if ``loss`` is a ``torch.nn.Module``.
     index_item_ids (bool, optional): If `True`, the item ids will be indexed. Used when the item ids
       are strings, or integers but don't start with 0 and can have values much larger than the total
       number of items in the dataset. The item ids index is provided by accessing `Recoder.item_id_map`,
@@ -87,7 +90,9 @@ class Recoder(object):
     self.autoencoder.eval()
 
   def __init_loss_module(self):
-    if self.loss == 'logistic':
+    if issubclass(self.loss.__class__, torch.nn.Module):
+      self.loss_module = self.loss
+    elif self.loss == 'logistic':
       self.loss_module = BCEWithLogitsLoss(reduction='sum', **self.loss_params)
     elif self.loss == 'mse':
       self.loss_module = MSELoss(reduction='sum', **self.loss_params)
