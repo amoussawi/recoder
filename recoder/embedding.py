@@ -48,9 +48,6 @@ class AnnoyEmbeddingsIndex(EmbeddingsIndex):
   Args:
     embeddings (numpy.array, optional): the matrix that holds the embeddings of shape
       (number of items * embedding size). Required to build the index.
-    index_file (str, optional): the index state file which is used to load or save the state of the
-      this index. Note: The annoy index file is stored in a separate file, which should be
-      in the same directory as index_file.
     id_map (dict, optional): A dict that maps the items original ids to the indices of the embeddings.
       Useful to fetch and do nearest neighbor search on the original items ids. If not provided,
       it will simply be an identity map.
@@ -61,23 +58,38 @@ class AnnoyEmbeddingsIndex(EmbeddingsIndex):
   [1]: https://github.com/spotify/annoy
   """
 
-  def __init__(self, embeddings=None, index_file=None,
-               id_map=None, n_trees=10, search_k=-1,
+  def __init__(self, embeddings=None, id_map=None,
+               n_trees=10, search_k=-1,
                include_distances=False):
     self.embeddings = embeddings
-    self.index_file = index_file
     self.n_trees = n_trees
     self.id_map = id_map
     self.search_k = search_k
     self.include_distances = include_distances
 
-  def build(self):
-    self.__build_index()
+  def build(self, index_file=None):
+    """
+    Builds the embeddings index, and stores it in ``index_file`` if provided.
 
-  def load(self):
-    self.__load_index()
+    Args:
+      index_file (str, optional): the index file path where to save the index. Note: The
+        annoy index file is stored in a separate file, which should be in the same directory
+        as ``index_file``.
+    """
+    self.__build_index(index_file=index_file)
 
-  def __build_index(self):
+  def load(self, index_file):
+    """
+    Loads the embeddings index from a saved index file.
+
+    Args:
+      index_file (str): the index file path to load the state of the index. Note: The
+        annoy index file is stored in a separate file, which should be in the same directory
+        as index_file.
+    """
+    self.__load_index(index_file=index_file)
+
+  def __build_index(self, index_file):
     self.embedding_size = self.embeddings.shape[1]
 
     self.index = an.AnnoyIndex(self.embedding_size, metric='angular')
@@ -93,24 +105,24 @@ class AnnoyEmbeddingsIndex(EmbeddingsIndex):
 
     self.inverse_id_map = dict([(v,k) for k,v in self.id_map.items()])
 
-    if self.index_file:
-      embeddings_file = self.index_file + '.embeddings'
+    if index_file:
+      embeddings_file = index_file + '.embeddings'
       state = {
         'embedding_size': self.embedding_size,
         'id_map': self.id_map,
       }
 
       self.index.save(embeddings_file)
-      with open(self.index_file, 'wb') as _index_file:
+      with open(index_file, 'wb') as _index_file:
         pickle.dump(state, _index_file)
 
-  def __load_index(self):
-    log.info('Loading index file from {}'.format(self.index_file))
-    with open(self.index_file, 'rb') as _index_file:
+  def __load_index(self, index_file):
+    log.info('Loading index file from {}'.format(index_file))
+    with open(index_file, 'rb') as _index_file:
       state = pickle.load(_index_file)
     self.embedding_size = state['embedding_size']
     self.id_map = state['id_map']
-    embeddings_file = self.index_file + '.embeddings'
+    embeddings_file = index_file + '.embeddings'
     self.index = an.AnnoyIndex(self.embedding_size, metric='angular')
     self.index.load(embeddings_file)
     self.inverse_id_map = dict([(v,k) for k,v in self.id_map.items()])
