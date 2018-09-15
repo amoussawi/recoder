@@ -26,7 +26,7 @@ class Recoder(object):
 
   Args:
     num_items (int, optional): Number of items to model. This is used as the size of the input layer.
-      If not provided, it will be guessed from the training dataset passed to ``train``.
+      If not provided, it will be computed from the training dataset passed to ``train``.
     hidden_layers (list, optional): Autoencoder hidden layers sizes. required for training from scratch.
     model_params (dict, optional): the Autoencoder model extra parameters other than `layer_sizes`,
       and `last_layer_act`.
@@ -39,10 +39,10 @@ class Recoder(object):
       the loss reduction is a sum reduction and not an elementwise mean.
     loss_params (dict, optional): loss function extra params based on loss module if ``loss`` is a ``str``.
       Ignored if ``loss`` is a ``torch.nn.Module``.
-    index_item_ids (bool, optional): If `True`, the item ids will be indexed. Used when the item ids
+    index_item_ids (bool, optional): If ``True``, the item ids will be indexed. Used when the item ids
       are strings, or integers but don't start with 0 and can have values much larger than the total
-      number of items in the dataset. The item ids index is provided by accessing `Recoder.item_id_map`,
-      which maps from original item id to the new item id. If `False`, the item ids in the dataset
+      number of items in the dataset. The item ids index is provided by accessing ``Recoder.item_id_map``,
+      which maps from original item id to the new item id. If ``False``, the item ids in the dataset
       should be integers, and the number of items will be equal to `max(item_ids) + 1` assuming item
       ids start with 0. Note: indexing the item ids can slightly slow the training process.
   """
@@ -238,9 +238,9 @@ class Recoder(object):
         items if needed.
       num_data_workers (int, optional): number of data workers to use for building the mini-batches.
       model_checkpoint_prefix (str, optional): model checkpoint save path prefix
-      checkpoint_freq (int, optional): epochs frequency of saving a checkpoint the model
+      checkpoint_freq (int, optional): epochs frequency of saving a checkpoint of the model
       eval_freq (int, optional): epochs frequency of doing an evaluation
-      eval_num_recommendations (int, optional): num of recommendations to generate on validation
+      eval_num_recommendations (int, optional): num of recommendations to generate on evaluation
       metrics (list, optional): list of ``Metric`` used to evaluate the model
     """
     log.info('{} Mode'.format('CPU' if self.device.type == 'cpu' else 'GPU'))
@@ -455,7 +455,7 @@ class Recoder(object):
     Predicts the user interactions with all items
 
     Args:
-      users_hist (list): A batch of users list of ``Interaction``
+      users_hist (list): A batch of users' history consisting of list of ``Interaction``
       return_input (bool, optional): whether to return the dense input batch
 
     Returns:

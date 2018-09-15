@@ -8,7 +8,8 @@ __Interaction = collections.namedtuple('__Interaction', ['item_id', 'inter'])
 
 class Interaction(__Interaction):
   """
-  Represents a single interaction of a user with an item.
+  Represents a single interaction of a user with an item. It can
+  be accessed as a tuple of item id and interaction value.
 
   Args:
     item_id (int or str): item id

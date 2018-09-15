@@ -46,7 +46,7 @@ def ndcg(x, y, k):
 
 class Metric(object):
   """
-  A Base class for metrics. All metrics should implement the evaluate function.
+  A Base class for metrics. All metrics should implement the ``evaluate`` function.
 
   Args:
     metric_name (str): metric name. useful for representing it as string
@@ -154,8 +154,8 @@ class RecommenderEvaluator(object):
       batch_size (int): the size of the users batch passed to the recommender
 
     Returns:
-      dict: A dict mapping each metric to its mean value evaluated on
-        each user recommendations
+      dict: A dict mapping each metric to the list of the metric values on each
+      user in the dataset.
     """
     dataloader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=True,
                                 collate_fn=lambda _: _)

@@ -22,6 +22,11 @@ class MSELoss(nn.Module):
   .. math::
     w = 1 + confidence \\times x
 
+  and the loss is:
+
+  .. math::
+    \ell(x, y) = w \cdot (y - x)^2
+
   Args:
     confidence (float, optional): the weighting of positive observations.
     reduction (string, optional): Specifies the reduction to apply to the output:

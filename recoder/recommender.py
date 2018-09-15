@@ -6,6 +6,10 @@ import recoder.utils as utils
 
 
 class Recommender(object):
+  """
+  Base Recommender that provide recommendations given users history of interactions.
+  All Recommenders should implement the ``recommend`` function.
+  """
 
   def recommend(self, users_hist):
     """
@@ -27,11 +31,13 @@ class SimilarityRecommender(Recommender):
 
   Implementation based on [1].
 
+  Note: This still needs improvement and optimization, and its implementation might change.
+
   Args:
     embeddings_index (EmbeddingsIndex): the embeddings index used to fetch embeddings and do nearest
       neighbor search.
     num_recommendations (int): number of recommendations to generate for each user.
-      not necessarily satisfied.
+      Note: the number of recommendations requirement is not necessarily satisfied.
     n (int, optional): number of similar items to retrieve for every item in user interactions.
     scale (int, optional): how much to scale the similarity between two items
 

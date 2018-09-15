@@ -18,7 +18,7 @@ class DynamicAutoencoder(nn.Module):
 
   Let `F` be a `DynamicAutoencoder` function that reconstructs vectors of size `d`,
   let `X` be a matrix of size `Bxd` where `B` is the batch size, and
-  let `Z` be any matrix and `I` be a vector, such that `1 <= I[i] <= d`
+  let `Z` be a sub-matrix of `X` and `I` be a vector of any length, such that `1 <= I[i] <= d`
   and `Z = X[:, I]`. The reconstruction of `Z` is `F(Z, I)`. See `Examples`.
 
   Args:
