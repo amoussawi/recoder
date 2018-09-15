@@ -1,0 +1,2 @@
+# empty requirements file to be passed to readthedocs so it ignores
+# the main requirements file due to memory issues
