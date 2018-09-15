@@ -8,12 +8,11 @@ import numpy as np
 
 def test_build_index():
   embeddings_mat = np.random.rand(1000, 128)
-  index = AnnoyEmbeddingsIndex(embeddings=embeddings_mat,
-                               index_file='/tmp/test_embeddings')
+  index = AnnoyEmbeddingsIndex(embeddings=embeddings_mat)
 
-  index.build()
-  index_loaded = AnnoyEmbeddingsIndex(index_file='/tmp/test_embeddings')
-  index_loaded.load()
+  index.build(index_file='/tmp/test_embeddings')
+  index_loaded = AnnoyEmbeddingsIndex()
+  index_loaded.load(index_file='/tmp/test_embeddings')
 
   assert index_loaded.embedding_size == index.embedding_size and index.embedding_size == 128
 
