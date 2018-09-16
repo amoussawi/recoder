@@ -1,5 +1,5 @@
 # Recoder
-[![Pypi version](https://img.shields.io/badge/pypi-0.1.0-blue.svg)](https://pypi.org/project/recsys-recoder/)
+[![Pypi version](https://img.shields.io/badge/dynamic/json.svg?label=pypi&url=https%3A%2F%2Fpypi.org%2Fpypi%2Frecsys-recoder%2Fjson&query=%24.info.version&colorB=blue)](https://pypi.org/project/recsys-recoder/)
 [![Docs status](https://readthedocs.org/projects/recoder/badge/?version=latest)](https://recoder.readthedocs.io/en/latest/)
 
 ### Introduction
@@ -7,7 +7,9 @@
 Recoder is a fast implementation for training collaborative filtering latent factor models with mini-batch based negative sampling following recent work:
 - [Towards Large Scale Training Of Autoencoders For Collaborative Filtering](https://arxiv.org/abs/1809.00999).
 
-Currently there's only an implementation for Autoencoder based latent factor models. SGD Matrix factorization to be added next. [Documentation](https://recoder.readthedocs.io/en/latest/) is available here.
+Currently the only supported latent factor model is the Autoencoder. SGD Matrix factorization to be added next.
+
+Check out the [Documentation](https://recoder.readthedocs.io/en/latest/).
 
 ### Installation
 ```bash
@@ -40,13 +42,13 @@ model_params = {
   'noise_prob': 0.5,
 }
 
-trainer = Recoder(hidden_layers=[200], model_params=model_params,
-                  use_cuda=True, optimizer_type='adam', loss='mse',
-                  loss_params={'confidence': 3})
+model = Recoder(hidden_layers=[200], model_params=model_params,
+                use_cuda=True, optimizer_type='adam', loss='mse',
+                loss_params={'confidence': 3})
 
-trainer.train(train_dataset=train_dataset, batch_size=500,
-              lr=1e-3, weight_decay=2e-5, num_epochs=100,
-              num_data_workers=4, num_neg_samples=0)
+model.train(train_dataset=train_dataset, batch_size=500,
+            lr=1e-3, weight_decay=2e-5, num_epochs=100,
+            num_data_workers=4, num_neg_samples=0)
 ```
 
 ### Further Reading
@@ -67,5 +69,5 @@ Please cite this paper in your publications if it helps your research:
 ```
 
 ### Acknowledgements
-- I would like to thank [Anghami](https://www.anghami.com) for supporting this work, and specially my colleagues, Helmi Rifai and Ramzi Karam, for great discussions on Collaborative Filtering at scale.
-
+- I would like to thank [Anghami](https://www.anghami.com) for supporting this work, and my colleagues, [Helmi Rifai](https://twitter.com/RifaiHelmi) and [Ramzi Karam](https://twitter.com/ramzikaram), for great discussions on Collaborative Filtering at scale.
+- This project started as a fork of [NVIDIA/DeepRecommender](https://github.com/NVIDIA/DeepRecommender), and although it went in a slightly different direction and was entirely refactored, the work in [NVIDIA/DeepRecommender](https://github.com/NVIDIA/DeepRecommender) was a great contribution to the work here.
