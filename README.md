@@ -4,7 +4,7 @@
 
 ### Introduction
 
-Recoder is a fast implementation for training collaborative filtering latent factor models with mini-batch based negative sampling following recent work:
+Recoder is a fast implementation for training collaborative filtering latent factor models with mini-batch based negative sampling. It's based on our poster paper that was published in ACM RecSys 2018:
 - [Towards Large Scale Training Of Autoencoders For Collaborative Filtering](https://arxiv.org/abs/1809.00999).
 
 Currently the only supported latent factor model is the Autoencoder. SGD Matrix factorization to be added next.
@@ -12,6 +12,7 @@ Currently the only supported latent factor model is the Autoencoder. SGD Matrix 
 Check out the [Documentation](https://recoder.readthedocs.io/en/latest/).
 
 ### Installation
+Recommended to use python 3.6.
 ```bash
 pip install recsys-recoder
 ```
