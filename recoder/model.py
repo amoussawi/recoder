@@ -312,15 +312,20 @@ class Recoder(object):
 
         # building the sparse tensor from
         input_idx, input_val, input_size, input_words = input
-        target_idx, target_val, target_size, target_words = target
-        input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size)\
-          .to(device=self.device).to_dense()
-        target_dense = torch.sparse.FloatTensor(target_idx, target_val, target_size)\
+        input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
           .to(device=self.device).to_dense()
         if input_words is not None:
           input_words = input_words.to(device=self.device)
-        if target_words is not None:
-          target_words = target_words.to(device=self.device)
+
+        if target is not None:
+          target_idx, target_val, target_size, target_words = target
+          target_dense = torch.sparse.FloatTensor(target_idx, target_val, target_size) \
+            .to(device=self.device).to_dense()
+          if target_words is not None:
+            target_words = target_words.to(device=self.device)
+        else:
+          target_dense = input_dense
+          target_words = input_words
 
         output = self.autoencoder(input_dense, input_words=input_words,
                                   target_words=target_words)
@@ -361,14 +366,20 @@ class Recoder(object):
     for itr, (input, target) in enumerate(val_dataloader):
 
       input_idx, input_val, input_size, input_words = input
-      target_idx, target_val, target_size, target_words = target
       input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
         .to(device=self.device).to_dense()
-      target_dense = torch.sparse.FloatTensor(target_idx, target_val, target_size).to(device=self.device).to_dense()
       if input_words is not None:
         input_words = input_words.to(device=self.device)
-      if target_words is not None:
-        target_words = target_words.to(device=self.device)
+
+      if target is not None:
+        target_idx, target_val, target_size, target_words = target
+        target_dense = torch.sparse.FloatTensor(target_idx, target_val, target_size)\
+          .to(device=self.device).to_dense()
+        if target_words is not None:
+          target_words = target_words.to(device=self.device)
+      else:
+        target_dense = input_dense
+        target_words = input_words
 
       output = self.autoencoder(input_dense, input_words=input_words,
                                 target_words=target_words)
@@ -401,7 +412,7 @@ class Recoder(object):
                                               num_neg_samples=num_neg_samples)
 
     if _target_batch is None:
-      target = input
+      target = None
     else:
       target = self.__collate_interactions_batch(_target_batch, with_ns=with_ns,
                                                  num_neg_samples=num_neg_samples)
