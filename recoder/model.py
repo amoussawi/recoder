@@ -217,7 +217,7 @@ class Recoder(object):
   def train(self, train_dataset, val_dataset=None,
             lr=0.001, weight_decay=0, num_epochs=1,
             batch_size=64, lr_milestones=None,
-            num_neg_samples=0, num_data_workers=0,
+            num_neg_samples=0, num_sampling_users=0, num_data_workers=0,
             model_checkpoint_prefix=None, checkpoint_freq=0,
             eval_freq=0, eval_num_recommendations=None, metrics=None):
     """
@@ -236,6 +236,10 @@ class Recoder(object):
         are sampled with mini-batch based negative sampling. If `> 0`, the negative items
         are sampled with mini-batch based negative sampling in addition to common random negative
         items if needed.
+      num_sampling_users (int, optional): number of users to consider for sampling items.
+        This is useful for increasing the number of negative samples in mini-batch based negative
+        sampling while keeping the batch-size small. If 0, then num_sampling_users will
+        be equal to batch_size.
       num_data_workers (int, optional): number of data workers to use for building the mini-batches.
       model_checkpoint_prefix (str, optional): model checkpoint save path prefix
       checkpoint_freq (int, optional): epochs frequency of saving a checkpoint of the model
@@ -256,16 +260,22 @@ class Recoder(object):
     for param in self.loss_params:
       log.info('Loss {}: {}'.format(param, self.loss_params[param]))
 
+    if num_sampling_users == 0:
+      num_sampling_users = batch_size
+
+    assert num_sampling_users >= batch_size and num_sampling_users % batch_size == 0, \
+      "number of sampling users should be a multiple of the batch size"
+
     self.__init_training(train_dataset=train_dataset, lr=lr, weight_decay=weight_decay)
 
-    collate_fn = lambda x: self.__collate_batch(x, with_ns=(num_neg_samples >= 0),
+    collate_fn = lambda x: self.__collate_batch(x, batch_size=batch_size,
                                                 num_neg_samples=num_neg_samples)
 
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size,
+    train_dataloader = DataLoader(train_dataset, batch_size=num_sampling_users,
                                   shuffle=True, collate_fn=collate_fn,
                                   num_workers=num_data_workers)
     if val_dataset is not None:
-      val_dataloader = DataLoader(val_dataset, batch_size=batch_size,
+      val_dataloader = DataLoader(val_dataset, batch_size=num_sampling_users,
                                   shuffle=True, collate_fn=collate_fn,
                                   num_workers=num_data_workers)
     else:
@@ -290,12 +300,11 @@ class Recoder(object):
                 metrics=metrics,
                 eval_num_recommendations=eval_num_recommendations)
 
-
   def _train(self, train_dataloader, val_dataloader,
              num_epochs, current_epoch, lr_scheduler,
              batch_size, model_checkpoint_prefix, checkpoint_freq,
              eval_freq, metrics, eval_num_recommendations):
-    num_batches = len(train_dataloader)
+    num_batches = int(np.ceil(len(train_dataloader.dataset) / batch_size))
     for epoch in range(current_epoch, num_epochs + 1):
       self.current_epoch = epoch
       self.autoencoder.train()
@@ -307,7 +316,7 @@ class Recoder(object):
         lr = self.optimizer.defaults['lr']
       description = 'Epoch {}/{} (lr={})'.format(epoch, num_epochs, lr)
       progress_bar = tqdm(range(num_batches), desc=description)
-      for batch_itr, (input, target) in enumerate(train_dataloader, 1):
+      for batch_itr, (input, target) in enumerate(self.__data_generator(train_dataloader), 1):
         self.optimizer.zero_grad()
 
         # building the sparse tensor from
@@ -336,7 +345,9 @@ class Recoder(object):
         self.optimizer.step()
 
         aggregated_losses.append(loss.item())
-        progress_bar.set_postfix(loss=np.mean(aggregated_losses[-1]), refresh=False)
+        progress_bar.set_postfix(loss=np.mean(aggregated_losses[-1]),
+                                 num_items=target_words.size(0),
+                                 refresh=False)
         progress_bar.update()
 
       postfix = {'loss': loss.item()}
@@ -363,7 +374,7 @@ class Recoder(object):
     total_loss = 0.0
     num_batches = 1
 
-    for itr, (input, target) in enumerate(val_dataloader):
+    for itr, (input, target) in enumerate(self.__data_generator(val_dataloader)):
 
       input_idx, input_val, input_size, input_words = input
       input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
@@ -398,8 +409,18 @@ class Recoder(object):
     loss = self.loss_module(output, target) / normalization
     return loss
 
-  def __collate_batch(self, batch, with_ns=True,
+  def __data_generator(self, data_loader):
+    for input, target in data_loader:
+      for batch_ind in range(len(input)):
+        if target is None:
+          yield input[batch_ind], None
+        else:
+          yield input[batch_ind], target[batch_ind]
+
+  def __collate_batch(self, batch, batch_size=0,
                       num_neg_samples=0):
+    # if batch_slice > 0 then the batch will be sliced into slices of size batch_size
+
     if type(batch[0]) is tuple:
       # then we have (input, target)
       _input_batch, _target_batch = utils.unzip(batch)
@@ -408,58 +429,88 @@ class Recoder(object):
       _input_batch = batch
       _target_batch = None
 
-    input = self.__collate_interactions_batch(_input_batch, with_ns=with_ns,
+    input = self.__collate_interactions_batch(_input_batch, batch_size=batch_size,
                                               num_neg_samples=num_neg_samples)
 
     if _target_batch is None:
       target = None
     else:
-      target = self.__collate_interactions_batch(_target_batch, with_ns=with_ns,
+      target = self.__collate_interactions_batch(_target_batch, batch_size=batch_size,
                                                  num_neg_samples=num_neg_samples)
 
     return input, target
 
-  def __collate_interactions_batch(self, batch, with_ns=True,
-                                   num_neg_samples=0):
-    batch_size = len(batch)
+  def __collate_interactions_batch(self, batch, batch_size,
+                                   num_neg_samples):
+    if batch_size == 0:
+      _batch_size = len(batch)
+    else:
+      _batch_size = batch_size
 
-    samples_inds = []
-    inter_inds = []
+    users_inds = []
+    items_inds = []
     inter_vals = []
+    examples_offsets = []
     for sample_i, user_inters in enumerate(batch):
       num_inters = len(user_inters)
-      samples_inds.extend([sample_i] * num_inters)
-      _inter_inds, _inter_vals = utils.unzip(user_inters)
+      users_inds.extend([sample_i % _batch_size] * num_inters)
+      user_item_ids, user_inter_vals = utils.unzip(user_inters)
       if self.index_item_ids:
-        _inter_inds = map(lambda item_id: self.item_id_map[item_id], _inter_inds)
-      inter_inds.extend(_inter_inds)
-      inter_vals.extend(_inter_vals)
+        user_item_ids = map(lambda item_id: self.item_id_map[item_id], user_item_ids)
+      items_inds.extend(user_item_ids)
+      inter_vals.extend(user_inter_vals)
+      if (sample_i + 1) % _batch_size == 0 or (sample_i + 1) == len(batch):
+        examples_offsets.append(len(users_inds))
 
-    if num_neg_samples >= 0 and with_ns:
+    if num_neg_samples >= 0:
       negative_items = np.random.randint(0, self._vector_dim, num_neg_samples)
-      negative_items = negative_items[np.isin(negative_items, inter_inds, invert=True)]
+      negative_items = negative_items[np.isin(negative_items, items_inds, invert=True)]
       num_negative_items = len(negative_items)
 
       # It's enough to fill the first sample in the batch with negative items
       # the others will be filled by transforming the sparse matrix into dense
       if num_negative_items > 0:
-        samples_inds.extend([0] * num_negative_items)
-        inter_inds.extend(negative_items)
+        users_inds.extend([0] * num_negative_items)
+        items_inds.extend(negative_items)
         inter_vals.extend([0] * num_negative_items)
 
-      active_columns_ordered = np.unique(inter_inds)
-      new_map = dict([(v, ind) for ind, v in enumerate(active_columns_ordered)])
-      inter_inds = list(map(lambda x: new_map[x], inter_inds))
-      _vector_dim = len(active_columns_ordered)
-      active_cols = torch.LongTensor(active_columns_ordered)
+      # The positive item ids in the batch
+      batch_item_ids = np.unique(items_inds)
+
+      # Reindex the item ids so they start with 0 and make
+      # max(new_ids) = len(batch_item_ids) so that the sparse
+      # batch only contains non-zero columns
+      new_map = dict([(v, ind) for ind, v in enumerate(batch_item_ids)])
+      items_inds = list(map(lambda x: new_map[x], items_inds))
+
+      _vector_dim = len(batch_item_ids)
+      batch_item_ids = torch.LongTensor(batch_item_ids)
     else:
       _vector_dim = self._vector_dim
-      active_cols = None
+      batch_item_ids = None
 
-    indices = torch.LongTensor([samples_inds, inter_inds])
-    values = torch.FloatTensor(inter_vals)
+    if batch_size > 0:
+      slices = []
+      prev_offset = 0
+      for example_offset in examples_offsets:
+        slice_users_inds = users_inds[prev_offset : example_offset]
+        slice_items_inds = items_inds[prev_offset : example_offset]
+        slice_inter_vals = inter_vals[prev_offset : example_offset]
+        prev_offset = example_offset
 
-    return indices, values, torch.Size([batch_size, _vector_dim]), active_cols
+        indices = torch.LongTensor([slice_users_inds, slice_items_inds])
+        values = torch.FloatTensor(slice_inter_vals)
+
+        slice_size = slice_users_inds[-1] + 1
+
+        slices.append((indices, values, torch.Size([slice_size, _vector_dim]), batch_item_ids))
+
+      return slices
+    else:
+      indices = torch.LongTensor([users_inds, items_inds])
+      values = torch.FloatTensor(inter_vals)
+
+      return indices, values, torch.Size([_batch_size, _vector_dim]), batch_item_ids
 
   def predict(self, users_hist, return_input=False):
     """
@@ -477,7 +528,7 @@ class Recoder(object):
       raise Exception('Model not initialized.')
 
     self.autoencoder.eval()
-    input, _ = self.__collate_batch(users_hist, with_ns=False)
+    input, _ = self.__collate_batch(users_hist, num_neg_samples=-1)
     input_idx, input_val, input_size, input_words = input
     input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
       .to(device=self.device).to_dense()
