@@ -1,4 +1,9 @@
-from torch.utils.data import Dataset
+import torch
+from torch.utils.data import Dataset, DataLoader
+
+import numpy as np
+
+import recoder.utils as utils
 
 import collections
 from concurrent.futures import ProcessPoolExecutor
@@ -104,3 +109,173 @@ class RecommendationDataset(Dataset):
       return self.__interactions[user]
     else:
       return self.__interactions[user], self.target_dataset.__interactions[user]
+
+
+class RecommendationDataLoader:
+  """
+  A ``DataLoader`` similar to ``torch.utils.data.DataLoader`` that handles
+  ``RecommendationDataset`` and generate batches with negative sampling.
+
+  Args:
+    dataset (RecommendationDataset): dataset from which to load the data
+    batch_size (int): number of samples per batch
+    vector_dim (int): the dimension size of the input vector (number of items)
+    num_neg_samples (int, optional): number of negative samples to generate for each user.
+      If `-1`, then all possible negative items will be sampled. If `0`, the negative items
+      are sampled with mini-batch based negative sampling. If `> 0`, the negative items
+      are sampled with mini-batch based negative sampling in addition to common random negative
+      items if needed.
+    num_sampling_users (int, optional): number of users to consider for mini-batch based negative
+      sampling. This is useful for increasing the number of negative samples while keeping the
+      batch-size small. If 0, then num_sampling_users will be equal to batch_size.
+    item_id_map (dict, optional): a map from original item id to the model item id
+    num_workers (int, optional): how many subprocesses to use for data loading.
+  """
+  def __init__(self, dataset, batch_size,
+               vector_dim, num_neg_samples=-1,
+               num_sampling_users=0, item_id_map=None,
+               num_workers=0):
+    self.dataset = dataset # type: RecommendationDataset
+    self.num_sampling_users = num_sampling_users
+    self.num_workers = num_workers
+    self.batch_size = batch_size
+    self.vector_dim = vector_dim
+    self.num_neg_samples = num_neg_samples
+    self.item_id_map = item_id_map
+
+    if self.num_sampling_users == 0:
+      self.num_sampling_users = batch_size
+
+    self.batch_collator = BatchCollator(batch_size=self.batch_size, vector_dim=self.vector_dim,
+                                        num_neg_samples=self.num_neg_samples, item_id_map=self.item_id_map)
+
+    self._dataloader = DataLoader(dataset, batch_size=self.num_sampling_users,
+                                  shuffle=True, num_workers=num_workers,
+                                  collate_fn=self.__collate_input_target)
+
+  def __generator(self):
+    for input, target in self._dataloader:
+      for batch_ind in range(len(input)):
+        if target is None:
+          yield input[batch_ind], None
+        else:
+          yield input[batch_ind], target[batch_ind]
+
+  def __collate_input_target(self, batch):
+    # if batch_slice > 0 then the batch will be sliced into slices of size batch_size
+
+    if type(batch[0]) is tuple:
+      # then we have (input, target)
+      _input_batch, _target_batch = utils.unzip(batch)
+    else:
+      # in that case the target is the same as the input
+      _input_batch = batch
+      _target_batch = None
+
+    input = self.batch_collator.collate(_input_batch)
+
+    if _target_batch is None:
+      target = None
+    else:
+      target = self.batch_collator.collate(_target_batch)
+
+    return input, target
+
+  def __iter__(self):
+    return self.__generator()
+
+  def __len__(self):
+    return int(np.ceil(len(self.dataset) / self.batch_collator.batch_size))
+
+
+class BatchCollator:
+  """
+  Collator of lists of ``Interaction``. It collates the samples into multiple batches
+  based on ``batch_size``.
+
+  Args:
+    batch_size (int): number of samples per batch
+    vector_dim (int): the dimension size of the input vector (number of items)
+    num_neg_samples (int, optional): number of negative samples to generate for each user.
+      If `-1`, then all possible negative items will be sampled. If `0`, the negative items
+      are sampled with mini-batch based negative sampling. If `> 0`, the negative items
+      are sampled with mini-batch based negative sampling in addition to common random negative
+      items if needed.
+    item_id_map (dict, optional): a map from original item id to the model item id
+  """
+  def __init__(self, batch_size, vector_dim,
+               num_neg_samples=-1, item_id_map=None):
+    self.batch_size = batch_size
+    self.vector_dim = vector_dim
+    self.item_id_map = item_id_map
+    self.num_neg_samples = num_neg_samples
+
+  def collate(self, batch):
+    """
+    Collates the ``batch``.
+
+    Args:
+      batch (list): list of lists of ``Interaction``.
+
+    Returns:
+      list: list of tuples where each tuple represent a sparse matrix of a mini-batch.
+      Each tuple contains: indices of values, values, batch size, the item ids in the batch.
+    """
+    users_inds = []
+    items_inds = []
+    inter_vals = []
+    examples_offsets = []
+    for sample_i, user_inters in enumerate(batch):
+      num_inters = len(user_inters)
+      users_inds.extend([sample_i % self.batch_size] * num_inters)
+      user_item_ids, user_inter_vals = utils.unzip(user_inters)
+      if self.item_id_map is not None:
+        user_item_ids = map(lambda item_id: self.item_id_map[item_id], user_item_ids)
+      items_inds.extend(user_item_ids)
+      inter_vals.extend(user_inter_vals)
+      if (sample_i + 1) % self.batch_size == 0 or (sample_i + 1) == len(batch):
+        examples_offsets.append(len(users_inds))
+
+    if self.num_neg_samples >= 0:
+      negative_items = np.random.randint(0, self.vector_dim, self.num_neg_samples)
+      negative_items = negative_items[np.isin(negative_items, items_inds, invert=True)]
+      num_negative_items = len(negative_items)
+
+      # It's enough to fill the first sample in the batch with negative items
+      # the others will be filled by transforming the sparse matrix into dense
+      if num_negative_items > 0:
+        users_inds.extend([0] * num_negative_items)
+        items_inds.extend(negative_items)
+        inter_vals.extend([0] * num_negative_items)
+
+      # The positive item ids in the batch
+      batch_item_ids = np.unique(items_inds)
+
+      # Reindex the item ids so they start with 0 and make
+      # max(new_ids) = len(batch_item_ids) so that the sparse
+      # batch only contains non-zero columns
+      new_map = dict([(v, ind) for ind, v in enumerate(batch_item_ids)])
+      items_inds = list(map(lambda x: new_map[x], items_inds))
+
+      _vector_dim = len(batch_item_ids)
+      batch_item_ids = torch.LongTensor(batch_item_ids)
+    else:
+      _vector_dim = self.vector_dim
+      batch_item_ids = None
+
+    slices = []
+    prev_offset = 0
+    for example_offset in examples_offsets:
+      slice_users_inds = users_inds[prev_offset : example_offset]
+      slice_items_inds = items_inds[prev_offset : example_offset]
+      slice_inter_vals = inter_vals[prev_offset : example_offset]
+      prev_offset = example_offset
+
+      indices = torch.LongTensor([slice_users_inds, slice_items_inds])
+      values = torch.FloatTensor(slice_inter_vals)
+
+      slice_size = slice_users_inds[-1] + 1
+
+      slices.append((indices, values, torch.Size([slice_size, _vector_dim]), batch_item_ids))
+
+    return slices
