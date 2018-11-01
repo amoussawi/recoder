@@ -9,9 +9,10 @@ from torch.nn import BCEWithLogitsLoss
 
 import numpy as np
 
+from recoder import __version__
 from recoder.data import RecommendationDataset, RecommendationDataLoader, BatchCollator
-from recoder.metrics import RecommenderEvaluator, Metric
-from recoder.nn import DynamicAutoencoder
+from recoder.metrics import RecommenderEvaluator
+from recoder.nn import FactorizationModel
 from recoder.recommender import InferenceRecommender
 from recoder.losses import MSELoss, MultinomialNLLLoss
 
@@ -20,15 +21,14 @@ from tqdm import tqdm
 
 class Recoder(object):
   """
-  Module to train/evaluate a recommendation Autoencoder-based model
+  Module to train/evaluate a recommendation ``FactorizationModel``.
 
   Args:
-    num_items (int, optional): Number of items to model. This is used as the size of the input layer.
-      If not provided, it will be computed from the training dataset passed to ``train``.
-    hidden_layers (list, optional): Autoencoder hidden layers sizes. required for training from scratch.
-    model_params (dict, optional): the Autoencoder model extra parameters other than `layer_sizes`,
-      and `last_layer_act`.
-    use_cuda (bool, optional): use GPU on training/evaluation the model.
+    model (FactorizationModel): the factorization model to train.
+    num_items (int, optional): the number of items to represent. If None, it will
+      be computed from the first training dataset passed to ``train()``.
+    num_users (int, optional): the number of users to represent. If not provided, it will
+      be computed from the first training dataset passed to ``train()``.
     optimizer_type (str, optional): optimizer type (one of 'sgd', 'adam', 'adagrad', 'rmsprop').
     loss (str or torch.nn.Module, optional): loss function used to train the model.
       If loss is a ``str``, it should be `mse` for ``recoder.losses.MSELoss``, `logistic` for
@@ -37,55 +37,58 @@ class Recoder(object):
       the loss reduction is a sum reduction and not an elementwise mean.
     loss_params (dict, optional): loss function extra params based on loss module if ``loss`` is a ``str``.
       Ignored if ``loss`` is a ``torch.nn.Module``.
-    index_item_ids (bool, optional): If ``True``, the item ids will be indexed. Used when the item ids
+    use_cuda (bool, optional): use GPU when training/evaluating the model.
+    index_ids (bool, optional): If ``True``, the item and user ids will be indexed. Used when those ids
       are strings, or integers but don't start with 0 and can have values much larger than the total
-      number of items in the dataset. The item ids index is provided by accessing ``Recoder.item_id_map``,
-      which maps from original item id to the model item id. If ``False``, the item ids in the dataset
-      should be integers, and the number of items will be equal to `max(item_ids) + 1` assuming item
-      ids start with 0. Note: indexing the item ids can slightly slow the training process.
+      number of items/users in the dataset. The ids index is provided by accessing ``Recoder.item_id_map``,
+      and ``Recoder.user_id_map`` which maps from original id to the model id.
+      If ``False``, the ids in the dataset should be integers, and the number of items/users will be
+      equal to `max(item_ids) + 1` assuming item ids start with 0. Note: indexing the item ids can
+      slightly slow the training process.
+    user_based (bool, optional): If your model is based on users or not. If True, an exception will
+      will be raised when there are inconsistencies between the users represented in the model
+      and the users in the training datasets.
+    item_based (bool, optional): If your model is based on items or not. If True, an exception will
+      will be raised when there are inconsistencies between the items represented in the model
+      and the items in the training datasets.
   """
 
-  def __init__(self, num_items=None, hidden_layers=None,
-               model_params=None, use_cuda=False, optimizer_type='sgd',
-               loss='mse', loss_params=None, index_item_ids=True):
+  def __init__(self, model: FactorizationModel,
+               num_items=None, num_users=None,
+               optimizer_type='sgd', loss='mse',
+               loss_params=None, use_cuda=False,
+               index_ids=True, user_based=True,
+               item_based=True):
 
+    self.model = model
     self.num_items = num_items
-    self.hidden_layers = hidden_layers
-    self.model_params = model_params if model_params else {}
+    self.num_users = num_users
     self.optimizer_type = optimizer_type
     self.loss = loss
     self.loss_params = loss_params if loss_params else {}
     self.use_cuda = use_cuda
-    self.index_item_ids = index_item_ids
+    self.index_ids = index_ids
 
     if self.use_cuda:
       self.device = torch.device('cuda')
     else:
       self.device = torch.device('cpu')
 
-    self.autoencoder = None
     self.item_id_map = None
+    self.user_id_map = None
     self.optimizer = None
     self.current_epoch = 1
-    self._vector_dim = num_items
     self.items = None
+    self.users = None
+
+    self.user_based = user_based
+    self.item_based = item_based
 
     self.__optimizer_state_dict = None
 
   def __init_model(self):
-    if self.autoencoder is not None:
-      return
-
-    layer_sizes = [self._vector_dim] + self.hidden_layers
-    _model_params = dict(self.model_params)
-    _model_params.pop('last_layer_act', None) # ignore last_layer_act param if it was passed
-    self.autoencoder = DynamicAutoencoder(layer_sizes=layer_sizes,
-                                          last_layer_act='none',
-                                          **_model_params)
-
-    self.autoencoder = self.autoencoder.to(device=self.device)
-
-    self.autoencoder.eval()
+    self.model.init_model(self.num_items, self.num_users)
+    self.model = self.model.to(device=self.device)
 
   def __init_loss_module(self):
     if issubclass(self.loss.__class__, torch.nn.Module):
@@ -96,6 +99,8 @@ class Recoder(object):
       self.loss_module = MSELoss(reduction='sum', **self.loss_params)
     elif self.loss == 'logloss':
       self.loss_module = MultinomialNLLLoss(reduction='sum')
+    elif self.loss is None:
+      raise ValueError('No loss function defined')
     else:
       raise ValueError('Unknown loss function {}'.format(self.loss))
 
@@ -104,7 +109,7 @@ class Recoder(object):
       self.__optimizer_state_dict = self.optimizer.state_dict()
 
     params = []
-    for param_name, param in self.autoencoder.named_parameters():
+    for param_name, param in self.model.named_parameters():
       _weight_decay = weight_decay
 
       if 'bias' in param_name:
@@ -138,19 +143,27 @@ class Recoder(object):
     if not os.path.isfile(model_file):
       raise Exception('No state file found in {}'.format(model_file))
     model_saved_state = torch.load(model_file, map_location='cpu')
-    self.hidden_layers = model_saved_state['hidden_layers']
-    self.model_params = model_saved_state['model_params']
+    model_params = model_saved_state['model_params']
     self.item_id_map = model_saved_state['item_id_map']
     self.current_epoch = model_saved_state['last_epoch']
-    self._vector_dim = model_saved_state['vector_dim']
-    self.loss = model_saved_state['loss']
-    self.loss_params = model_saved_state['loss_params']
+    self.loss = model_saved_state.get('loss', None)
+    self.loss_params = model_saved_state.get('loss_params', None)
     self.optimizer_type = model_saved_state['optimizer_type']
-
+    self.items = model_saved_state.get('items', None) or self.num_items
+    self.users = model_saved_state.get('users', None)
+    self.num_items = model_saved_state.get('num_items', None)
+    self.num_users = model_saved_state.get('num_users', None)
     self.__optimizer_state_dict = model_saved_state['optimizer']
 
+    # old versions backward compatibility
+    if 'hidden_layers' in model_saved_state:
+      model_params['hidden_layers'] = model_saved_state['hidden_layers']
+    if 'vector_dim' in model_saved_state:
+      self.num_items = model_saved_state['vector_dim']
+
+    self.model.load_model_params(model_params)
     self.__init_model()
-    self.autoencoder.load_state_dict(model_saved_state['model'])
+    self.model.load_state_dict(model_saved_state['model'])
 
   def save_state(self, model_checkpoint_prefix):
     """
@@ -166,17 +179,24 @@ class Recoder(object):
     checkpoint_file = "{}_epoch_{}.model".format(model_checkpoint_prefix, self.current_epoch)
     log.info("Saving model to {}".format(checkpoint_file))
     current_state = {
-      'vector_dim': self._vector_dim,
-      'hidden_layers': self.hidden_layers,
-      'model_params': self.model_params,
+      'recoder_version': __version__,
+      'model_params': self.model.model_params(),
       'item_id_map': self.item_id_map,
+      'user_id_map': self.user_id_map,
       'last_epoch': self.current_epoch,
-      'model': self.autoencoder.state_dict(),
+      'model': self.model.state_dict(),
       'optimizer_type': self.optimizer_type,
       'optimizer': self.optimizer.state_dict(),
-      'loss': self.loss,
-      'loss_params': self.loss_params,
+      'items': self.items,
+      'users': self.users,
+      'num_items': self.num_items,
+      'num_users': self.num_users
     }
+
+    if self.loss is str:
+      current_state['loss'] = self.loss,
+      current_state['loss_params'] = self.loss_params
+
     torch.save(current_state, checkpoint_file)
     return checkpoint_file
 
@@ -187,26 +207,56 @@ class Recoder(object):
     else:
       self.items = list(set(self.items + train_dataset.items))
 
-    if self.index_item_ids:
-      if self._vector_dim is None:
-        self._vector_dim = len(self.items)
-      else:
-        assert self._vector_dim >= len(self.items), \
-          'number of items should be smaller or equal than the vector dimension'
+    if self.users is None:
+      self.users = train_dataset.users
+    else:
+      self.users = list(set(self.users + train_dataset.users))
+
+    if self.index_ids:
+      if self.num_users is None:
+        self.num_users = len(self.users)
+      elif self.user_based:
+        assert self.num_users >= len(self.users), \
+          'Number of users in the model should be greater or equal than the number of users in the dataset.' \
+          'If your model is independent of users, set user_dependent to False in Recoder constructor.'
+
+      if self.user_id_map is None:
+        self.user_id_map = dict([(user_id, idx) for idx, user_id in enumerate(self.users)])
+      elif self.user_based:
+        assert len(np.setdiff1d(self.users, list(self.user_id_map.keys()))) == 0, \
+          "There are users in the dataset that doesn't exist in the items index." \
+          "If your model is not based on users, set user_based to False in Recoder constructor."
+
+      if self.num_items is None:
+        self.num_items = len(self.items)
+      elif self.item_based:
+        assert self.num_items >= len(self.items), \
+          'Number of items in the model should be greater or equal than the number of items in the dataset.' \
+          'If your model is not based on items, set item_based to False in Recoder constructor.'
 
       if self.item_id_map is None:
         self.item_id_map = dict([(item_id, idx) for idx, item_id in enumerate(self.items)])
-      else:
+      elif self.item_based:
         assert len(np.setdiff1d(self.items, list(self.item_id_map.keys()))) == 0, \
-          "there are items in the dataset that doesn't exist in the items index"
+          "There are items in the dataset that doesn't exist in the items index." \
+          "If your model is not based on items, set item_based to False in Recoder constructor."
     else:
-      assert type(self.items[0]) is int, 'item ids should be integers, or set index_item_ids to True'
+      assert type(self.items[0]) is int, 'item ids should be integers, or set index_ids to True'
+      assert type(self.users[0]) is int, 'user ids should be integers, or set index_ids to True'
 
-      if self._vector_dim is None:
-        self._vector_dim = int(np.max(self.items)) + 1
-      else:
-        assert self._vector_dim >= int(np.max(self.items)) + 1,\
-          'the largest item id should be smaller than vector dimension'
+      if self.num_items is None:
+        self.num_items = int(np.max(self.items)) + 1
+      elif self.item_based:
+        assert self.num_items >= int(np.max(self.items)) + 1,\
+          'The largest item id should be smaller than number of items.' \
+          'If your model is not based on items, set item_based to False in Recoder constructor.'
+
+      if self.num_users is None:
+        self.num_users = int(np.max(self.users)) + 1
+      elif self.user_based:
+        assert self.num_users >= int(np.max(self.users)) + 1,\
+          'The largest user id should be smaller than number of users.' \
+          'If your model is not based on users, set user_based to False in Recoder constructor.'
 
     self.__init_model()
     self.__init_optimizer(lr=lr, weight_decay=weight_decay)
@@ -246,9 +296,9 @@ class Recoder(object):
       metrics (list[Metric], optional): list of ``Metric`` used to evaluate the model
     """
     log.info('{} Mode'.format('CPU' if self.device.type == 'cpu' else 'GPU'))
-    log.info('Hidden Layers: {}'.format(self.hidden_layers))
-    for param in self.model_params:
-      log.info('Model {}: {}'.format(param, self.model_params[param]))
+    model_params = self.model.model_params()
+    for param in model_params:
+      log.info('Model {}: {}'.format(param, model_params[param]))
     log.info('Initial Learning Rate: {}'.format(lr))
     log.info('Weight decay: {}'.format(weight_decay))
     log.info('Batch Size: {}'.format(batch_size))
@@ -267,16 +317,18 @@ class Recoder(object):
     self.__init_training(train_dataset=train_dataset, lr=lr, weight_decay=weight_decay)
 
     train_dataloader = RecommendationDataLoader(train_dataset, batch_size=batch_size,
-                                                vector_dim=self._vector_dim,
+                                                vector_dim=self.num_items,
                                                 num_neg_samples=num_neg_samples,
                                                 item_id_map=self.item_id_map,
+                                                user_id_map=self.user_id_map,
                                                 num_sampling_users=num_sampling_users,
                                                 num_workers=num_data_workers)
     if val_dataset is not None:
       val_dataloader = RecommendationDataLoader(val_dataset, batch_size=batch_size,
-                                                vector_dim=self._vector_dim,
+                                                vector_dim=self.num_items,
                                                 num_neg_samples=num_neg_samples,
                                                 item_id_map=self.item_id_map,
+                                                user_id_map=self.user_id_map,
                                                 num_sampling_users=num_sampling_users,
                                                 num_workers=num_data_workers)
     else:
@@ -308,7 +360,7 @@ class Recoder(object):
     num_batches = len(train_dataloader)
     for epoch in range(current_epoch, num_epochs + 1):
       self.current_epoch = epoch
-      self.autoencoder.train()
+      self.model.train()
       aggregated_losses = []
       if lr_scheduler is not None:
         lr_scheduler.step()
@@ -320,34 +372,19 @@ class Recoder(object):
       for batch_itr, (input, target) in enumerate(train_dataloader, 1):
         self.optimizer.zero_grad()
 
-        # building the sparse tensor from
-        input_idx, input_val, input_size, input_words = input
-        input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
-          .to(device=self.device).to_dense()
-        if input_words is not None:
-          input_words = input_words.to(device=self.device)
-
-        if target is not None:
-          target_idx, target_val, target_size, target_words = target
-          target_dense = torch.sparse.FloatTensor(target_idx, target_val, target_size) \
-            .to(device=self.device).to_dense()
-          if target_words is not None:
-            target_words = target_words.to(device=self.device)
+        if target is None:
+          target_items = input.items
         else:
-          target_dense = input_dense
-          target_words = input_words
+          target_items = target.items
 
-        output = self.autoencoder(input_dense, input_words=input_words,
-                                  target_words=target_words)
-
-        loss = self._compute_loss(output, target_dense)
+        loss = self.__compute_loss(input, target)
 
         loss.backward()
         self.optimizer.step()
 
         aggregated_losses.append(loss.item())
         progress_bar.set_postfix(loss=np.mean(aggregated_losses[-1]),
-                                 num_items=target_words.size(0),
+                                 num_items=target_items.size(0),
                                  refresh=False)
         progress_bar.update()
 
@@ -370,33 +407,13 @@ class Recoder(object):
       progress_bar.close()
 
   def _validate(self, val_dataloader):
-    self.autoencoder.eval()
+    self.model.eval()
 
     total_loss = 0.0
     num_batches = 1
 
     for itr, (input, target) in enumerate(val_dataloader):
-
-      input_idx, input_val, input_size, input_words = input
-      input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
-        .to(device=self.device).to_dense()
-      if input_words is not None:
-        input_words = input_words.to(device=self.device)
-
-      if target is not None:
-        target_idx, target_val, target_size, target_words = target
-        target_dense = torch.sparse.FloatTensor(target_idx, target_val, target_size)\
-          .to(device=self.device).to_dense()
-        if target_words is not None:
-          target_words = target_words.to(device=self.device)
-      else:
-        target_dense = input_dense
-        target_words = input_words
-
-      output = self.autoencoder(input_dense, input_words=input_words,
-                                target_words=target_words)
-
-      loss = self._compute_loss(output, target_dense)
+      loss = self.__compute_loss(input, target)
       total_loss += loss.item()
       num_batches = itr + 1
 
@@ -404,10 +421,37 @@ class Recoder(object):
 
     return avg_loss
 
-  def _compute_loss(self, output, target):
+  def __compute_loss(self, input, target):
+    input_items = input.items
+    input_users = input.users
+    input_dense = torch.sparse.FloatTensor(input.indices, input.values, input.size) \
+      .to(device=self.device).to_dense()
+    if input_items is not None:
+      input_items = input_items.to(device=self.device)
+    if input_users is not None:
+      input_users = input_users.to(device=self.device)
+
+    if target is not None:
+      target_items = target.items
+      target_users = target.users
+      target_dense = torch.sparse.FloatTensor(target.indices, target.values, target.size) \
+        .to(device=self.device).to_dense()
+      if target_items is not None:
+        target_items = target_items.to(device=self.device)
+      if target_users is not None:
+        target_users = target_users.to(device=self.device)
+    else:
+      target_dense = input_dense
+      target_items = input_items
+      target_users = input_users
+
+    output = self.model(input_dense, input_items=input_items,
+                        input_users=input_users, target_items=target_items,
+                        target_users=target_users)
+
     # Average loss over samples in a batch
-    normalization = torch.FloatTensor([target.size(0)]).to(device=self.device)
-    loss = self.loss_module(output, target) / normalization
+    normalization = torch.FloatTensor([target_dense.size(0)]).to(device=self.device)
+    loss = self.loss_module(output, target_dense) / normalization
     return loss
 
   def predict(self, users_hist, return_input=False):
@@ -422,26 +466,27 @@ class Recoder(object):
       if ``return_input`` is ``True`` a tuple of the predictions and the input batch
       is returned, otherwise only the predictions are returned
     """
-    if self.autoencoder is None:
+    if self.model is None:
       raise Exception('Model not initialized.')
 
-    self.autoencoder.eval()
+    self.model.eval()
 
-    batch_collator = BatchCollator(batch_size=len(users_hist), vector_dim=self._vector_dim,
-                                   num_neg_samples=-1, item_id_map=self.item_id_map)
+    batch_collator = BatchCollator(batch_size=len(users_hist), vector_dim=self.num_items,
+                                   num_neg_samples=-1, item_id_map=self.item_id_map,
+                                   user_id_map=self.user_id_map)
 
     input = batch_collator.collate(users_hist)
-    input_idx, input_val, input_size, input_words = input[0]
-    input_dense = torch.sparse.FloatTensor(input_idx, input_val, input_size) \
+    batch = input[0]
+    input_dense = torch.sparse.FloatTensor(batch.indices, batch.values, batch.size) \
       .to(device=self.device).to_dense()
-    output = self.autoencoder(input_dense, full_output=True).cpu()
+    output = self.model(input_dense, input_users=batch.users.to(device=self.device)).cpu()
     return output, input_dense.cpu() if return_input else output
 
   def _evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
-    if self.autoencoder is None:
+    if self.model is None:
       raise Exception('Model not initialized')
 
-    self.autoencoder.eval()
+    self.model.eval()
     recommender = InferenceRecommender(self, num_recommendations)
 
     evaluator = RecommenderEvaluator(recommender, metrics)
