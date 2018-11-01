@@ -158,7 +158,7 @@ class RecommenderEvaluator(object):
       user in the dataset.
     """
     dataloader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=True,
-                                collate_fn=lambda _: _)
+                            collate_fn=lambda _: _)
 
     results = {}
     for metric in self.metrics:
@@ -169,7 +169,7 @@ class RecommenderEvaluator(object):
 
       recommendations = self.recommender.recommend(input)
 
-      relevant_songs = [utils.unzip(l)[0] for l in target]
+      relevant_songs = [interactions.items for interactions in target]
 
       for x, y in zip(recommendations, relevant_songs):
         for metric in self.metrics:
