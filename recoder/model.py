@@ -68,6 +68,8 @@ class Recoder(object):
     self.loss_params = loss_params if loss_params else {}
     self.use_cuda = use_cuda
     self.index_ids = index_ids
+    self.user_based = user_based
+    self.item_based = item_based
 
     if self.use_cuda:
       self.device = torch.device('cuda')
@@ -77,18 +79,21 @@ class Recoder(object):
     self.item_id_map = None
     self.user_id_map = None
     self.optimizer = None
+    self.sparse_optimizer = None
     self.current_epoch = 1
     self.items = None
     self.users = None
-
-    self.user_based = user_based
-    self.item_based = item_based
-
+    self.__model_initialized = False
     self.__optimizer_state_dict = None
+    self.__sparse_optimizer_state_dict = None
 
   def __init_model(self):
+    if self.__model_initialized:
+      return
+
     self.model.init_model(self.num_items, self.num_users)
     self.model = self.model.to(device=self.device)
+    self.__model_initialized = True
 
   def __init_loss_module(self):
     if issubclass(self.loss.__class__, torch.nn.Module):
@@ -105,25 +110,58 @@ class Recoder(object):
       raise ValueError('Unknown loss function {}'.format(self.loss))
 
   def __init_optimizer(self, lr, weight_decay):
+    # When continuing training on the same Recoder instance
     if self.optimizer is not None:
       self.__optimizer_state_dict = self.optimizer.state_dict()
 
+    if self.sparse_optimizer is not None:
+      self.__sparse_optimizer_state_dict = self.sparse_optimizer.state_dict()
+
+    # Collecting sparse parameter names
+    sparse_params_names = []
+    sparse_modules = [torch.nn.Embedding, torch.nn.EmbeddingBag]
+    for module_name, module in self.model.named_modules():
+      if type(module) in sparse_modules and module.sparse:
+        sparse_params_names.extend([module_name + '.' + param_name
+                                    for param_name, param in module.named_parameters()])
+
+    # Initializing optimizer params
     params = []
+    sparse_params = []
     for param_name, param in self.model.named_parameters():
       _weight_decay = weight_decay
 
       if 'bias' in param_name:
         _weight_decay = 0
 
-      params.append({'params': param, 'weight_decay': _weight_decay})
+      if param_name in sparse_params_names:
+        # If module is an embedding layer with sparse gradients
+        # then add its parameters to sparse optimizer
+        sparse_params.append({'params': param, 'weight_decay': _weight_decay})
+      else:
+        params.append({'params': param, 'weight_decay': _weight_decay})
 
     if self.optimizer_type == "adam":
-      self.optimizer = optim.Adam(params, lr=lr)
+      if len(params) > 0:
+        self.optimizer = optim.Adam(params, lr=lr)
+
+      if len(sparse_params) > 0:
+        self.sparse_optimizer = optim.SparseAdam(sparse_params, lr=lr)
+
     elif self.optimizer_type == "adagrad":
+      if len(sparse_params) > 0:
+        raise ValueError('Sparse gradients optimization not supported with adagrad')
+
       self.optimizer = optim.Adagrad(params, lr=lr)
     elif self.optimizer_type == "sgd":
+      if len(sparse_params) > 0:
+        raise ValueError('Sparse gradients optimization not supported with sgd')
+
       self.optimizer = optim.SGD(params, lr=lr, momentum=0.9)
     elif self.optimizer_type == "rmsprop":
+      if len(sparse_params) > 0:
+        raise ValueError('Sparse gradients optimization not supported with rmsprop')
+
       self.optimizer = optim.RMSprop(params, lr=lr, momentum=0.9)
     else:
       raise Exception('Unknown optimizer kind')
@@ -131,6 +169,10 @@ class Recoder(object):
     if self.__optimizer_state_dict is not None:
       self.optimizer.load_state_dict(self.__optimizer_state_dict)
       self.__optimizer_state_dict = None # no need for this anymore
+
+    if self.__sparse_optimizer_state_dict is not None and self.sparse_optimizer is not None:
+      self.sparse_optimizer.load_state_dict(self.__sparse_optimizer_state_dict)
+      self.__sparse_optimizer_state_dict = None
 
   def init_from_model_file(self, model_file):
     """
@@ -154,6 +196,7 @@ class Recoder(object):
     self.num_items = model_saved_state.get('num_items', None)
     self.num_users = model_saved_state.get('num_users', None)
     self.__optimizer_state_dict = model_saved_state['optimizer']
+    self.__sparse_optimizer_state_dict = model_saved_state.get('sparse_optimizer', None)
 
     # old versions backward compatibility
     if 'hidden_layers' in model_saved_state:
@@ -370,7 +413,11 @@ class Recoder(object):
       description = 'Epoch {}/{} (lr={})'.format(epoch, num_epochs, lr)
       progress_bar = tqdm(range(num_batches), desc=description)
       for batch_itr, (input, target) in enumerate(train_dataloader, 1):
-        self.optimizer.zero_grad()
+        if self.optimizer is not None:
+          self.optimizer.zero_grad()
+
+        if self.sparse_optimizer is not None:
+          self.sparse_optimizer.zero_grad()
 
         if target is None:
           target_items = input.items
@@ -380,7 +427,11 @@ class Recoder(object):
         loss = self.__compute_loss(input, target)
 
         loss.backward()
-        self.optimizer.step()
+        if self.optimizer is not None:
+          self.optimizer.step()
+
+        if self.sparse_optimizer is not None:
+          self.sparse_optimizer.step()
 
         aggregated_losses.append(loss.item())
         progress_bar.set_postfix(loss=np.mean(aggregated_losses[-1]),

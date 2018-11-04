@@ -123,15 +123,16 @@ class DynamicAutoencoder(FactorizationModel):
       [torch.FloatTensor of size 32x500]
   """
 
-  def __init__(self, hidden_layers, activation_type='tanh',
+  def __init__(self, hidden_layers=None, activation_type='tanh',
                is_constrained=False, dropout_prob=0.0,
-               noise_prob=0.0):
+               noise_prob=0.0, sparse=False):
     super().__init__()
     self.activation_type = activation_type
     self.is_constrained = is_constrained
     self.hidden_layers = hidden_layers
     self.dropout_prob = dropout_prob
     self.noise_prob = noise_prob
+    self.sparse = sparse
 
     self.num_items = None
     self.num_embeddings = None
@@ -166,14 +167,15 @@ class DynamicAutoencoder(FactorizationModel):
     }
 
   def load_model_params(self, model_params):
-    self.hidden_layers = model_params['activation_type']
+    self.hidden_layers = model_params['hidden_layers']
     self.activation_type = model_params['activation_type']
     self.is_constrained = model_params['is_constrained']
     self.dropout_prob = model_params['dropout_prob']
     self.noise_prob = model_params['noise_prob']
 
   def __create_encoding_layers(self):
-    self.en_embedding_layer = nn.Embedding(self.num_embeddings, self.hidden_layers[0])
+    self.en_embedding_layer = nn.Embedding(self.num_embeddings, self.hidden_layers[0],
+                                           sparse=self.sparse)
 
     self.__en_linear_embedding_layer = LinearEmbedding(self.en_embedding_layer, input_based=True)
     self.encoding_layers = nn.Sequential(*self.__create_coding_layers(self.hidden_layers))
@@ -196,7 +198,8 @@ class DynamicAutoencoder(FactorizationModel):
 
       self.de_embedding_layer = self.en_embedding_layer
     else:
-      self.de_embedding_layer = nn.Embedding(self.num_embeddings, self.hidden_layers[0])
+      self.de_embedding_layer = nn.Embedding(self.num_embeddings, self.hidden_layers[0],
+                                             sparse=self.sparse)
 
     self.decoding_layers = nn.Sequential(*_decoding_layers)
 
@@ -287,7 +290,7 @@ class MatrixFactorization(FactorizationModel):
     dropout_prob (float, optional): dropout probability to be applied on the user embedding
   """
   def __init__(self, embedding_size, activation_type='none',
-               dropout_prob=0):
+               dropout_prob=0, sparse=False):
     super().__init__()
     self.embedding_size = embedding_size
     self.activation_type = activation_type
@@ -299,13 +302,16 @@ class MatrixFactorization(FactorizationModel):
     self.item_embedding_layer = None
     self.bias = None
     self.dropout_layer = None
+    self.sparse = sparse
 
   def init_model(self, num_items=None, num_users=None):
     self.num_users = num_users
     self.num_items = num_items
 
-    self.user_embedding_layer = nn.Embedding(self.num_users, self.embedding_size)
-    self.item_embedding_layer = nn.Embedding(self.num_items, self.embedding_size)
+    self.user_embedding_layer = nn.Embedding(self.num_users, self.embedding_size,
+                                             sparse=self.sparse)
+    self.item_embedding_layer = nn.Embedding(self.num_items, self.embedding_size,
+                                             sparse=self.sparse)
     self.bias = nn.Parameter(torch.Tensor(self.num_items))
 
     self.dropout_layer = None
