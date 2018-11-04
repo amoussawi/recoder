@@ -4,6 +4,7 @@ training_set/
 nf_prize_dataset.tar.gz
 Netflix/
 data/
+!tests/data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
