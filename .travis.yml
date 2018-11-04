@@ -1,0 +1,13 @@
+language: python
+python: "3.6"
+
+branches:
+  only:
+    - master
+    - dev
+
+install: pip install -q -r requirements.txt
+
+script:
+  - python setup.py install
+  - pytest tests/
