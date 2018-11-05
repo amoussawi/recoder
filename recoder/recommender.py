@@ -54,7 +54,7 @@ class SimilarityRecommender(Recommender):
     self.n = n
 
   def __recommend_single(self, user_hist):
-    user_items = np.array(utils.unzip(user_hist)[0])
+    user_items = np.array(user_hist.items)
 
     items_pool = [self.embeddings_index.get_nns_by_id(item_id, self.n)
                   for item_id in user_items]
