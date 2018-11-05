@@ -436,8 +436,15 @@ class Recoder(object):
           self.sparse_optimizer.step()
 
         aggregated_losses.append(loss.item())
+
+        # Number of items in the batch
+        if target_items is not None:
+          num_items = target_items.size(0)
+        else:
+          num_items = train_dataloader.vector_dim
+
         progress_bar.set_postfix(loss=np.mean(aggregated_losses[-1]),
-                                 num_items=target_items.size(0),
+                                 num_items=num_items,
                                  refresh=False)
         progress_bar.update()
 
