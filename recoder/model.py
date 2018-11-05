@@ -87,6 +87,8 @@ class Recoder(object):
     self.__optimizer_state_dict = None
     self.__sparse_optimizer_state_dict = None
 
+    self.__inverse_item_id_map = None
+
   def __init_model(self):
     if self.__model_initialized:
       return
@@ -545,6 +547,41 @@ class Recoder(object):
     results = evaluator.evaluate(eval_dataset, batch_size=batch_size)
     return results
 
+  def recommend(self, users_hist, num_recommendations):
+    """
+    Generate list of recommendations for each user in ``users_hist``.
+
+    Args:
+      users_hist (list[UserInteractions]): list of users interactions.
+      num_recommendations: number of recommendations to generate.
+
+    Returns:
+      list: list of recommended items for each user in users_hist.
+    """
+    output, input = self.predict(users_hist, return_input=True)
+    input = input.numpy()
+    output = output.data.numpy()
+
+    output[input > 0] = - np.inf
+
+    top_ind = np.argpartition(-output, num_recommendations, axis=1)
+    top_ind = top_ind[:, :num_recommendations]
+    top_output = output[np.arange(output.shape[0])[:, None], top_ind]
+
+    top_sorted_reset_ind = np.argsort(-top_output, axis=1)
+
+    top_sorted_ind = top_ind[np.arange(top_ind.shape[0])[:, None], top_sorted_reset_ind]
+
+    # Map the recommended model item ids back to original item ids
+    inverse_item_id_map = self.__get_inverse_item_id_map()
+    if inverse_item_id_map is not None:
+      item_id_mapper = np.vectorize(lambda item_id: inverse_item_id_map[item_id])
+      recommendations = item_id_mapper(top_sorted_ind)
+    else:
+      recommendations = top_sorted_ind.tolist()
+
+    return recommendations
+
   def evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
     """
     Evaluates the current model given an evaluation dataset.
@@ -559,3 +596,13 @@ class Recoder(object):
                              batch_size=batch_size)
     for metric in results:
       log.info('{}: {}'.format(metric, np.mean(results[metric])))
+
+  def __get_inverse_item_id_map(self):
+    if self.item_id_map is None:
+      return None
+
+    if self.__inverse_item_id_map is None:
+      self.__inverse_item_id_map = {model_item_id:item_id
+                                    for item_id, model_item_id in self.item_id_map.items()}
+
+    return self.__inverse_item_id_map
