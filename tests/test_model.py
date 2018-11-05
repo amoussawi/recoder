@@ -10,10 +10,11 @@ from recoder.nn import DynamicAutoencoder, MatrixFactorization
 import os
 
 
-@pytest.mark.parametrize("exp_recall_20,exp_recall_50,exp_ndcg_100",[
-  (0.40, 0.43, 0.45),
+@pytest.mark.parametrize("sparse,exp_recall_20,exp_recall_50,exp_ndcg_100",[
+  (False, 0.40, 0.43, 0.45),
+  (True, 0.40, 0.43, 0.45),
 ])
-def test_model(exp_recall_20, exp_recall_50, exp_ndcg_100):
+def test_model(sparse, exp_recall_20, exp_recall_50, exp_ndcg_100):
   data_dir = 'tests/data/'
   model_dir = '/tmp/'
 
@@ -34,7 +35,7 @@ def test_model(exp_recall_20, exp_recall_50, exp_ndcg_100):
 
   use_cuda = False
   model = DynamicAutoencoder(hidden_layers=[200], activation_type='tanh',
-                             noise_prob=0.5, sparse=False)
+                             noise_prob=0.5, sparse=sparse)
   trainer = Recoder(model=model, use_cuda=use_cuda, optimizer_type='adam',
                     loss='logloss')
 
@@ -61,7 +62,7 @@ def test_model(exp_recall_20, exp_recall_50, exp_ndcg_100):
   model_checkpoint = model_dir + 'test_model.model'
   state_file = trainer.save_state(model_checkpoint)
 
-  model = DynamicAutoencoder(sparse=False)
+  model = DynamicAutoencoder(sparse=sparse)
   trainer = Recoder(model=model, use_cuda=use_cuda,
                     optimizer_type='adam', loss='logloss')
 
