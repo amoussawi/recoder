@@ -133,7 +133,7 @@ class NDCG(Metric):
 
 class RecommenderEvaluator(object):
   """
-  Evaluates a ``Recommender`` given a set of ``Metric``
+  Evaluates a :class:`recoder.recommender.Recommender` given a set of :class:`Metric`
 
   Args:
     recommender (Recommender): the Recommender to evaluate

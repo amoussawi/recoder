@@ -41,9 +41,9 @@ def _dataframe_to_interactions(dataframe, user_col='user',
 
 class RecommendationDataset(Dataset):
   """
-  Represents a ``torch.utils.data.Dataset`` that iterates through the users interactions with items.
+  Represents a :class:`torch.utils.data.Dataset` that iterates through the users interactions with items.
 
-  Indexing the dataset will return a tuple of the user input and target ``UserInteractions``
+  Indexing the dataset will return a tuple of the user input and target :class:`UserInteractions`
   if a ``target_dataset`` is provided, otherwise the target is ``None``.
 
   Args:
@@ -114,7 +114,7 @@ class RecommendationDataset(Dataset):
 class RecommendationDataLoader:
   """
   A ``DataLoader`` similar to ``torch.utils.data.DataLoader`` that handles
-  ``RecommendationDataset`` and generate batches with negative sampling.
+  :class:`RecommendationDataset` and generate batches with negative sampling.
 
   Args:
     dataset (RecommendationDataset): dataset from which to load the data
@@ -205,7 +205,7 @@ class Batch:
 
 class BatchCollator:
   """
-  Collator of lists of ``Interaction``. It collates the samples into multiple batches
+  Collator of lists of :class:`UserInteractions`. It collates the samples into multiple :class:`Batch`
   based on ``batch_size``.
 
   Args:
@@ -230,13 +230,13 @@ class BatchCollator:
 
   def collate(self, samples):
     """
-    Collates samples of ``UserInteractions`` into batches of size ``batch_size``.
+    Collates samples of :class:`UserInteractions` into batches of size ``batch_size``.
 
     Args:
-      samples (list): list of lists of ``UserInteractions``.
+      samples (list): list of lists of :class:`UserInteractions`.
 
     Returns:
-      list[Batch]: list of ``Batch``.
+      list[Batch]: list of batches.
     """
     users_inds = []
     items_inds = []

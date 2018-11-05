@@ -13,10 +13,10 @@ class Recommender(object):
 
   def recommend(self, users_hist):
     """
-    Recommends a list of items for each user list of ``Interaction``.
+    Recommends a list of items for each user list of :class:`recoder.data.UserInteractions`.
 
     Args:
-       users_hist (list): list of users list of ``Interaction`` .
+       users_hist (list): list of users list of :class:`recoder.data.UserInteractions`.
 
     Returns:
       list: items recommended for each user
@@ -27,7 +27,7 @@ class Recommender(object):
 class SimilarityRecommender(Recommender):
   """
   Recommends items based on similarity search of the items in the user list
-  of ``Interaction``.
+  of :class:`recoder.data.UserInteractions`.
 
   Implementation based on [1].
 
@@ -103,7 +103,7 @@ class SimilarityRecommender(Recommender):
 
 class InferenceRecommender(Recommender):
   """
-  Recommends items based on the predictions by a ``Recoder`` model
+  Recommends items based on the predictions by a :class:`recoder.model.Recoder` model.
 
   Args:
     model (Recoder): model used to predict recommendations

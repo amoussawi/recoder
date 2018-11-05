@@ -21,7 +21,7 @@ from tqdm import tqdm
 
 class Recoder(object):
   """
-  Module to train/evaluate a recommendation ``FactorizationModel``.
+  Module to train/evaluate a recommendation :class:`recoder.nn.FactorizationModel`.
 
   Args:
     model (FactorizationModel): the factorization model to train.

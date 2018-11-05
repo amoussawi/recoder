@@ -28,7 +28,7 @@ class FactorizationModel(nn.Module):
   def model_params(self):
     """
     Returns the model parameters. Mainly used when storing the model hyper-parameters
-    (i.e hidden layers, activation..etc) in a snapshot file by ``Recoder``.
+    (i.e hidden layers, activation..etc) in a snapshot file by :class:`recoder.model.Recoder`.
 
     Returns:
       dict: Model parameters.
@@ -39,7 +39,7 @@ class FactorizationModel(nn.Module):
     """
     Loads the ``model_params`` into the model. Mainly used when loading the model
     hyper-parameters (i.e hidden layers, activation..etc) from a snapshot file of
-    the model stored by ``Recoder``.
+    the model stored by :class:`recoder.model.Recoder`.
 
     Args:
       model_params (dict): model parameters
