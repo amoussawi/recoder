@@ -113,30 +113,6 @@ class InferenceRecommender(Recommender):
                num_recommendations):
     self.model = model
     self.num_recommendations = num_recommendations
-    if self.model.item_id_map is None:
-      self.item_id_inverse_map = None
-    else:
-      self.item_id_inverse_map = dict([(v,k) for k,v in model.item_id_map.items()])
 
   def recommend(self, users_hist):
-    output, input = self.model.predict(users_hist, return_input=True)
-    input = input.numpy()
-    output = output.data.numpy()
-
-    output[input > 0] = - np.inf
-
-    top_ind = np.argpartition(-output, self.num_recommendations, axis=1)
-    top_ind = top_ind[:, :self.num_recommendations]
-    top_output = output[np.arange(output.shape[0])[:, None], top_ind]
-
-    top_sorted_reset_ind = np.argsort(-top_output, axis=1)
-
-    top_sorted_ind = top_ind[np.arange(top_ind.shape[0])[:, None], top_sorted_reset_ind]
-
-    if self.item_id_inverse_map is not None:
-      item_id_mapper = np.vectorize(lambda item_id: self.item_id_inverse_map[item_id])
-      recommendations = item_id_mapper(top_sorted_ind)
-    else:
-      recommendations = top_sorted_ind.tolist()
-
-    return recommendations
+    return self.model.recommend(users_hist, self.num_recommendations)
