@@ -84,14 +84,17 @@ class DynamicAutoencoder(FactorizationModel):
       decoder (tying the weights).
     dropout_prob (float, optional): dropout probability at the bottleneck layer
     noise_prob (float, optional): dropout (noise) probability at the input layer
+    sparse (bool, optional): if True, gradients w.r.t. to the embedding layers weight matrices
+      will be sparse tensors. Currently, sparse gradients are only fully supported by
+      ``torch.optim.SparseAdam``.
 
   Examples::
 
     >>>> autoencoder = DynamicAutoencoder([500,100])
     >>>> batch_size = 32
     >>>> input = torch.rand(batch_size, 5)
-    >>>> input_words = torch.LongTensor([10, 126, 452, 29, 34])
-    >>>> output = autoencoder(input, input_words=input_words)
+    >>>> input_items = torch.LongTensor([10, 126, 452, 29, 34])
+    >>>> output = autoencoder(input, input_items=input_items, target_items=input_items)
     >>>> output
        0.0850  0.9490  ...   0.2430  0.5323
        0.3519  0.4816  ...   0.9483  0.2497
@@ -100,9 +103,9 @@ class DynamicAutoencoder(FactorizationModel):
        0.5006  0.9532  ...   0.8333  0.4330
       [torch.FloatTensor of size 32x5]
     >>>>
-    >>>> # predicting a different target of words
-    >>>> target_words = torch.LongTensor([31, 14, 95, 49, 10, 36, 239])
-    >>>> output = autoencoder(input, input_words=input_words, target_words=target_words)
+    >>>> # predicting a different target of items
+    >>>> target_items = torch.LongTensor([31, 14, 95, 49, 10, 36, 239])
+    >>>> output = autoencoder(input, input_items=input_items, target_items=target_items)
     >>>> output
        0.5446  0.5468  ...   0.9854  0.6465
        0.0564  0.1238  ...   0.5645  0.6576
@@ -288,6 +291,10 @@ class MatrixFactorization(FactorizationModel):
     activation_type (str, optional): activation function to be applied on the user embedding.
       all activations in torch.nn.functional are supported.
     dropout_prob (float, optional): dropout probability to be applied on the user embedding
+    sparse (bool, optional): if True, gradients w.r.t. to the embedding layers weight matrices
+      will be sparse tensors. Currently, sparse gradients are only fully supported by
+      ``torch.optim.SparseAdam``.
+
   """
   def __init__(self, embedding_size, activation_type='none',
                dropout_prob=0, sparse=False):
