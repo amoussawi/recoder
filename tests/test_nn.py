@@ -7,7 +7,8 @@ import pytest
 
 @pytest.fixture
 def autoencoder():
-  autoencoder = DynamicAutoencoder([500, 300, 200])
+  autoencoder = DynamicAutoencoder([300, 200])
+  autoencoder.init_model(num_items=500)
   return autoencoder
 
 
@@ -21,23 +22,21 @@ def test_DynamicAutoencoder(autoencoder):
   assert autoencoder.encoding_layers[0].weight.size(0) == 200
   assert autoencoder.decoding_layers[0].weight.size(1) == 200
 
-
-def test_forward(autoencoder):
   batch_size = 32
   input = torch.rand(batch_size, 5)
-  input_words = torch.LongTensor([10, 126, 452, 29, 34])
-  output = autoencoder(input, input_words=input_words)
+  input_items = torch.LongTensor([10, 126, 452, 29, 34])
+  output = autoencoder(input, input_items=input_items,
+                       target_items=input_items)
 
   assert output.size(0) == batch_size
-  assert output.size(1) == input_words.size(0)
+  assert output.size(1) == input_items.size(0)
 
-  target_words = torch.LongTensor([31, 14, 95, 49, 10, 36, 239])
-  output = autoencoder(input, input_words=input_words,
-                       target_words=target_words)
+  target_items = torch.LongTensor([31, 14, 95, 49, 10, 36, 239])
+  output = autoencoder(input, input_items=input_items,
+                       target_items=target_items)
   assert output.size(0) == batch_size
-  assert output.size(1) == target_words.size(0)
+  assert output.size(1) == target_items.size(0)
 
-  output = autoencoder(input, input_words=input_words,
-                       full_output=True)
+  output = autoencoder(input, input_items=input_items)
   assert output.size(0) == batch_size
   assert output.size(1) == 500

@@ -4,6 +4,7 @@ import glog
 from recoder.model import Recoder
 from recoder.data import RecommendationDataset
 from recoder.metrics import AveragePrecision, Recall, NDCG
+from recoder.nn import DynamicAutoencoder, MatrixFactorization
 
 import multiprocessing as mp
 
@@ -15,6 +16,7 @@ common_params = {
   'user_col': 'uid',
   'item_col': 'sid',
   'inter_col': 'listen',
+  'num_workers': mp.cpu_count(),
 }
 
 glog.info('Loading Data...')
@@ -26,20 +28,23 @@ train_dataset = RecommendationDataset()
 val_te_dataset = RecommendationDataset()
 val_tr_dataset = RecommendationDataset(target_dataset=val_te_dataset)
 
+# uncomment it to train with MatrixFactorization
+# train_df = train_df.append(val_tr_df)
+
 train_dataset.fill_from_dataframe(dataframe=train_df, **common_params)
 val_te_dataset.fill_from_dataframe(dataframe=val_te_df, **common_params)
 val_tr_dataset.fill_from_dataframe(dataframe=val_tr_df, **common_params)
 
 use_cuda = True
 
-model_params = {
-  'activation_type': 'tanh',
-  'noise_prob': 0.5,
-}
+model = DynamicAutoencoder(hidden_layers=[200], activation_type='tanh',
+                           noise_prob=0.5, sparse=True)
 
-trainer = Recoder(hidden_layers=[200], model_params=model_params,
-                  use_cuda=use_cuda, optimizer_type='adam',
-                  loss='logistic', index_item_ids=False)
+# model = MatrixFactorization(embedding_size=200, activation_type='tanh',
+#                             dropout_prob=0.5, sparse=False)
+
+trainer = Recoder(model=model, use_cuda=use_cuda, optimizer_type='adam',
+                  loss='logistic', user_based=False, index_ids=False)
 
 # trainer.init_from_model_file(model_dir + 'bce_ns_d_0.0_n_0.5_200_epoch_50.model')
 model_checkpoint = model_dir + 'bce_ns_d_0.0_n_0.5_200'

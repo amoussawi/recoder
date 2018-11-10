@@ -11,6 +11,7 @@ Recoder
     :caption: Contents:
 
     Quickstart <quickstart>
+    Tutorial <tutorial>
     recoder
     data
     nn

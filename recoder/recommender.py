@@ -13,10 +13,10 @@ class Recommender(object):
 
   def recommend(self, users_hist):
     """
-    Recommends a list of items for each user list of ``Interaction``.
+    Recommends a list of items for each user list of :class:`recoder.data.UserInteractions`.
 
     Args:
-       users_hist (list): list of users list of ``Interaction`` .
+       users_hist (list): list of users list of :class:`recoder.data.UserInteractions`.
 
     Returns:
       list: items recommended for each user
@@ -27,7 +27,7 @@ class Recommender(object):
 class SimilarityRecommender(Recommender):
   """
   Recommends items based on similarity search of the items in the user list
-  of ``Interaction``.
+  of :class:`recoder.data.UserInteractions`.
 
   Implementation based on [1].
 
@@ -54,7 +54,7 @@ class SimilarityRecommender(Recommender):
     self.n = n
 
   def __recommend_single(self, user_hist):
-    user_items = np.array(utils.unzip(user_hist)[0])
+    user_items = np.array(user_hist.items)
 
     items_pool = [self.embeddings_index.get_nns_by_id(item_id, self.n)
                   for item_id in user_items]
@@ -103,7 +103,7 @@ class SimilarityRecommender(Recommender):
 
 class InferenceRecommender(Recommender):
   """
-  Recommends items based on the predictions by a ``Recoder`` model
+  Recommends items based on the predictions by a :class:`recoder.model.Recoder` model.
 
   Args:
     model (Recoder): model used to predict recommendations
@@ -113,30 +113,6 @@ class InferenceRecommender(Recommender):
                num_recommendations):
     self.model = model
     self.num_recommendations = num_recommendations
-    if self.model.item_id_map is None:
-      self.item_id_inverse_map = None
-    else:
-      self.item_id_inverse_map = dict([(v,k) for k,v in model.item_id_map.items()])
 
   def recommend(self, users_hist):
-    output, input = self.model.predict(users_hist, return_input=True)
-    input = input.numpy()
-    output = output.data.numpy()
-
-    output[input > 0] = - np.inf
-
-    top_ind = np.argpartition(-output, self.num_recommendations, axis=1)
-    top_ind = top_ind[:, :self.num_recommendations]
-    top_output = output[np.arange(output.shape[0])[:, None], top_ind]
-
-    top_sorted_reset_ind = np.argsort(-top_output, axis=1)
-
-    top_sorted_ind = top_ind[np.arange(top_ind.shape[0])[:, None], top_sorted_reset_ind]
-
-    if self.item_id_inverse_map is not None:
-      item_id_mapper = np.vectorize(lambda item_id: self.item_id_inverse_map[item_id])
-      recommendations = item_id_mapper(top_sorted_ind)
-    else:
-      recommendations = top_sorted_ind.tolist()
-
-    return recommendations
+    return self.model.recommend(users_hist, self.num_recommendations)

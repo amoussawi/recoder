@@ -8,6 +8,7 @@ from recoder.model import Recoder
 from recoder.recommender import InferenceRecommender, SimilarityRecommender
 from recoder.embedding import AnnoyEmbeddingsIndex, MemCacheEmbeddingsIndex
 from recoder.metrics import AveragePrecision, Recall, NDCG, RecommenderEvaluator
+from recoder.nn import DynamicAutoencoder
 
 root_dir = './'
 data_dir = root_dir + 'data/ml-20m/pro_sg/'
@@ -26,12 +27,13 @@ index_file = model_dir + 'bce_ns_d_0.0_n_0.5_200_epoch_100.model.index'
 num_recommendations = 100
 
 if method == 'inference':
-  model = Recoder()
-  model.init_from_model_file(model_file)
-  recommender = InferenceRecommender(model, num_recommendations)
+  model = DynamicAutoencoder()
+  recoder = Recoder(model)
+  recoder.init_from_model_file(model_file)
+  recommender = InferenceRecommender(recoder, num_recommendations)
 elif method == 'similarity':
-  embeddings_index = AnnoyEmbeddingsIndex(index_file=index_file)
-  embeddings_index.load()
+  embeddings_index = AnnoyEmbeddingsIndex()
+  embeddings_index.load(index_file=index_file)
   cache_embeddings_index = MemCacheEmbeddingsIndex(embeddings_index)
   recommender = SimilarityRecommender(cache_embeddings_index, num_recommendations, scale=1, n=50)
 
