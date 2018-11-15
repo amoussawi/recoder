@@ -15,6 +15,8 @@ Check out the [Documentation](https://recoder.readthedocs.io/en/latest/) and
 the [Tutorial](https://recoder.readthedocs.io/en/latest/tutorial.html).
 
 ### Installation
+Recommended to use python 3.6. Python 2 is not supported.
+
 ```bash
 pip install -U recsys-recoder
 ```
