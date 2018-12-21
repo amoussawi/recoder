@@ -11,7 +11,7 @@ def generate_dataframe():
   data['user'] = np.random.randint(0, 100, 1000)
   data['item'] = np.random.randint(0, 200, 1000)
   data['inter'] = np.ones(1000)
-  data = data.drop_duplicates(['user', 'item'])
+  data = data.drop_duplicates(['user', 'item']).reset_index(drop=True)
   return data
 
 @pytest.fixture
@@ -68,7 +68,6 @@ def test_RecommendationDataset_target(input_dataframe, target_dataframe):
   assert len(input_interactions.items) > 0 and len(target_interactions.items) > 0
 
   assert input_interactions.items != target_interactions.items
-  assert input_interactions.values != target_interactions.values
 
 
 @pytest.mark.parametrize("batch_size,num_sampling_users",
