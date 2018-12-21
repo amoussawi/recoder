@@ -309,7 +309,7 @@ class Recoder(object):
 
   def train(self, train_dataset, val_dataset=None,
             lr=0.001, weight_decay=0, num_epochs=1,
-            batch_size=64, lr_milestones=None,
+            iters_per_epoch=None, batch_size=64, lr_milestones=None,
             num_neg_samples=0, num_sampling_users=0, num_data_workers=0,
             model_checkpoint_prefix=None, checkpoint_freq=0,
             eval_freq=0, eval_num_recommendations=None, metrics=None):
@@ -322,6 +322,8 @@ class Recoder(object):
       lr (float, optional): learning rate.
       weight_decay (float, optional): weight decay (L2 normalization).
       num_epochs (int, optional): number of epochs to train the model.
+      iters_per_epoch (int, optional): number of training iterations per training epoch. If None,
+        one epoch is full number of training samples in the dataset
       batch_size (int, optional): batch size
       lr_milestones (list, optional): optimizer learning rate epochs milestones (0.1 decay).
       num_neg_samples (int, optional): number of negative samples to generate for each user.
@@ -396,13 +398,19 @@ class Recoder(object):
                 checkpoint_freq=checkpoint_freq,
                 eval_freq=eval_freq,
                 metrics=metrics,
-                eval_num_recommendations=eval_num_recommendations)
+                eval_num_recommendations=eval_num_recommendations,
+                iters_per_epoch=iters_per_epoch)
 
   def _train(self, train_dataloader, val_dataloader,
              num_epochs, current_epoch, lr_scheduler,
              batch_size, model_checkpoint_prefix, checkpoint_freq,
-             eval_freq, metrics, eval_num_recommendations):
+             eval_freq, metrics, eval_num_recommendations, iters_per_epoch):
     num_batches = len(train_dataloader)
+
+    iters_processed = 0
+    if iters_per_epoch is None:
+      iters_per_epoch = num_batches
+
     for epoch in range(current_epoch, num_epochs + 1):
       self.current_epoch = epoch
       self.model.train()
@@ -413,8 +421,20 @@ class Recoder(object):
       else:
         lr = self.optimizer.defaults['lr']
       description = 'Epoch {}/{} (lr={})'.format(epoch, num_epochs, lr)
-      progress_bar = tqdm(range(num_batches), desc=description)
-      for batch_itr, (input, target) in enumerate(train_dataloader, 1):
+
+      if iters_processed == 0 or iters_processed == num_batches:
+        # If we are starting from scratch,
+        # or we iterated through the whole dataloader,
+        # reset and reinitialize the iterator
+        iters_processed = 0
+        iterator = enumerate(train_dataloader, 1)
+
+      iters_to_process = min(iters_per_epoch, num_batches - iters_processed)
+      iters_processed += iters_to_process
+
+      progress_bar = tqdm(range(iters_to_process), desc=description)
+
+      for batch_itr, (input, target) in iterator:
         if self.optimizer is not None:
           self.optimizer.zero_grad()
 
@@ -447,6 +467,9 @@ class Recoder(object):
                                  num_items=num_items,
                                  refresh=False)
         progress_bar.update()
+
+        if batch_itr % iters_per_epoch == 0:
+          break
 
       postfix = {'loss': loss.item()}
       if eval_freq > 0 and epoch % eval_freq == 0 and val_dataloader is not None:
