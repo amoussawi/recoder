@@ -85,18 +85,22 @@ class RecommendationDataset(Dataset):
     if num_workers > 0:
       pool_exec = ProcessPoolExecutor(num_workers)
       futures = []
-      chunk_size = int(len(dataframe_users) / num_workers) + 1
-      users_chunks = [dataframe_users[offset:offset + chunk_size]
-                      for offset in range(0, len(dataframe_users), chunk_size)]
+      chunk_size = int(len(dataframe) / num_workers)
 
-      for users_chunk in users_chunks:
-        dataframe_chunk = dataframe[dataframe[user_col].isin(users_chunk)]
+      for offset in range(0, len(dataframe), chunk_size):
+        dataframe_chunk = dataframe[offset:offset+chunk_size]
         futures.append(pool_exec.submit(_dataframe_to_interactions, dataframe_chunk,
                                         user_col=user_col, item_col=item_col,
                                         inter_col=inter_col))
 
       for future in futures:
-        self.__interactions.update(future.result())
+        result = future.result()
+        for user in result:
+          if user in self.__interactions:
+            self.__interactions[user].items = np.append(self.__interactions[user].items, result[user].items)
+            self.__interactions[user].values = np.append(self.__interactions[user].values, result[user].values)
+          else:
+            self.__interactions[user] = result[user]
 
       pool_exec.shutdown()
     else:
