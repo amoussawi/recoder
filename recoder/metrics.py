@@ -144,7 +144,7 @@ class RecommenderEvaluator(object):
     self.recommender = recommender
     self.metrics = metrics
 
-  def evaluate(self, eval_dataset, batch_size=1):
+  def evaluate(self, eval_dataset, batch_size=1, num_users=None):
     """
     Evaluates the recommender with an evaluation dataset.
 
@@ -152,6 +152,8 @@ class RecommenderEvaluator(object):
       eval_dataset (RecommendationDataset): the dataset to use
         in evaluating the model
       batch_size (int): the size of the users batch passed to the recommender
+      num_users (int, optional): the number of users from the dataset to evaluate on. If None,
+        evaluate on all users
 
     Returns:
       dict: A dict mapping each metric to the list of the metric values on each
@@ -164,6 +166,7 @@ class RecommenderEvaluator(object):
     for metric in self.metrics:
       results[metric] = []
 
+    processed_num_users = 0
     for batch in dataloader:
       input, target = utils.unzip(batch)
 
@@ -174,5 +177,9 @@ class RecommenderEvaluator(object):
       for x, y in zip(recommendations, relevant_songs):
         for metric in self.metrics:
           results[metric].append(metric.evaluate(x, y))
+
+      processed_num_users += len(target)
+      if num_users is not None and processed_num_users >= num_users:
+        break
 
     return results

@@ -312,7 +312,7 @@ class Recoder(object):
             iters_per_epoch=None, batch_size=64, lr_milestones=None,
             num_neg_samples=0, num_sampling_users=0, num_data_workers=0,
             model_checkpoint_prefix=None, checkpoint_freq=0,
-            eval_freq=0, eval_num_recommendations=None, metrics=None):
+            eval_freq=0, eval_num_recommendations=None, eval_num_users=None, metrics=None):
     """
     Trains the model
 
@@ -340,6 +340,8 @@ class Recoder(object):
       model_checkpoint_prefix (str, optional): model checkpoint save path prefix
       eval_freq (int, optional): epochs frequency of doing an evaluation
       eval_num_recommendations (int, optional): num of recommendations to generate on evaluation
+      eval_num_users (int, optional): number of users from the validation dataset to use for evaluation.
+        If None, all users in the validation dataset are used for evaluation.
       metrics (list[Metric], optional): list of ``Metric`` used to evaluate the model
     """
     log.info('{} Mode'.format('CPU' if self.device.type == 'cpu' else 'GPU'))
@@ -399,12 +401,14 @@ class Recoder(object):
                 eval_freq=eval_freq,
                 metrics=metrics,
                 eval_num_recommendations=eval_num_recommendations,
-                iters_per_epoch=iters_per_epoch)
+                iters_per_epoch=iters_per_epoch,
+                eval_num_users=eval_num_users)
 
   def _train(self, train_dataloader, val_dataloader,
              num_epochs, current_epoch, lr_scheduler,
              batch_size, model_checkpoint_prefix, checkpoint_freq,
-             eval_freq, metrics, eval_num_recommendations, iters_per_epoch):
+             eval_freq, metrics, eval_num_recommendations, iters_per_epoch,
+             eval_num_users):
     num_batches = len(train_dataloader)
 
     iters_processed = 0
@@ -478,7 +482,8 @@ class Recoder(object):
         if metrics is not None and eval_num_recommendations is not None:
           results = self._evaluate(val_dataloader.dataset,
                                    num_recommendations=eval_num_recommendations,
-                                   metrics=metrics, batch_size=batch_size)
+                                   metrics=metrics, batch_size=batch_size,
+                                   num_users=eval_num_users)
           for metric in results:
             postfix[str(metric)] = np.mean(results[metric])
 
@@ -565,7 +570,7 @@ class Recoder(object):
     output = self.model(input_dense, input_users=batch.users.to(device=self.device)).cpu()
     return output, input_dense.cpu() if return_input else output
 
-  def _evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
+  def _evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1, num_users=None):
     if self.model is None:
       raise Exception('Model not initialized')
 
@@ -574,7 +579,7 @@ class Recoder(object):
 
     evaluator = RecommenderEvaluator(recommender, metrics)
 
-    results = evaluator.evaluate(eval_dataset, batch_size=batch_size)
+    results = evaluator.evaluate(eval_dataset, batch_size=batch_size, num_users=num_users)
     return results
 
   def recommend(self, users_hist, num_recommendations):
@@ -612,7 +617,7 @@ class Recoder(object):
 
     return recommendations
 
-  def evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
+  def evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1, num_users=None):
     """
     Evaluates the current model given an evaluation dataset.
 
@@ -623,7 +628,7 @@ class Recoder(object):
       batch_size (int, optional): batch size of computations.
     """
     results = self._evaluate(eval_dataset, num_recommendations, metrics,
-                             batch_size=batch_size)
+                             batch_size=batch_size, num_users=num_users)
     for metric in results:
       log.info('{}: {}'.format(metric, np.mean(results[metric])))
 
