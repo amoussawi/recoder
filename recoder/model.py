@@ -258,28 +258,28 @@ class Recoder(object):
       self.users = list(set(self.users + train_dataset.users))
 
     if self.index_ids:
-      if self.num_users is None:
+      if self.user_based and self.num_users is None:
         self.num_users = len(self.users)
       elif self.user_based:
         assert self.num_users >= len(self.users), \
           'Number of users in the model should be greater or equal than the number of users in the dataset.' \
           'If your model is independent of users, set user_dependent to False in Recoder constructor.'
 
-      if self.user_id_map is None:
+      if self.user_based and self.user_id_map is None:
         self.user_id_map = dict([(user_id, idx) for idx, user_id in enumerate(self.users)])
       elif self.user_based:
         assert len(np.setdiff1d(self.users, list(self.user_id_map.keys()))) == 0, \
           "There are users in the dataset that doesn't exist in the items index." \
           "If your model is not based on users, set user_based to False in Recoder constructor."
 
-      if self.num_items is None:
+      if self.item_based and self.num_items is None:
         self.num_items = len(self.items)
       elif self.item_based:
         assert self.num_items >= len(self.items), \
           'Number of items in the model should be greater or equal than the number of items in the dataset.' \
           'If your model is not based on items, set item_based to False in Recoder constructor.'
 
-      if self.item_id_map is None:
+      if self.item_based and self.item_id_map is None:
         self.item_id_map = dict([(item_id, idx) for idx, item_id in enumerate(self.items)])
       elif self.item_based:
         assert len(np.setdiff1d(self.items, list(self.item_id_map.keys()))) == 0, \
@@ -289,14 +289,14 @@ class Recoder(object):
       assert type(self.items[0]) is int, 'item ids should be integers, or set index_ids to True'
       assert type(self.users[0]) is int, 'user ids should be integers, or set index_ids to True'
 
-      if self.num_items is None:
+      if self.item_based and self.num_items is None:
         self.num_items = int(np.max(self.items)) + 1
       elif self.item_based:
         assert self.num_items >= int(np.max(self.items)) + 1,\
           'The largest item id should be smaller than number of items.' \
           'If your model is not based on items, set item_based to False in Recoder constructor.'
 
-      if self.num_users is None:
+      if self.user_based and self.num_users is None:
         self.num_users = int(np.max(self.users)) + 1
       elif self.user_based:
         assert self.num_users >= int(np.max(self.users)) + 1,\
