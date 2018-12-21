@@ -14,8 +14,8 @@ class UserInteractions:
 
   Args:
     user (str or int): user id
-    items (list): list of items the user interacted with
-    values (list): values of the interactions between the user and the items
+    items (np.array): list of items the user interacted with
+    values (np.array): values of the interactions between the user and the items
   """
   def __init__(self, user, items, values):
     self.user = user
@@ -33,8 +33,14 @@ def _dataframe_to_interactions(dataframe, user_col='user',
 
   for user in users:
     user_data = grouped_data_df.get_group(user)
-    interactions[user] = UserInteractions(user=user, items=user_data[item_col].tolist(),
-                                          values=user_data[inter_col].tolist())
+    # It's important to have items and values arrays as Numpy
+    # in order for them to be properly shared among multiple processes
+    # and not getting copied.
+    # Reference: https://github.com/pytorch/pytorch/issues/13246#issuecomment-445770039
+    items_np = np.array(user_data[item_col].values)
+    values_np = np.array(user_data[inter_col].values)
+    interactions[user] = UserInteractions(user=user, items=items_np,
+                                          values=values_np)
 
   return interactions
 
