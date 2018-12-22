@@ -4,6 +4,8 @@ from torch.utils.data import DataLoader
 
 import recoder.utils as utils
 
+from multiprocessing import Process, Queue
+
 
 def average_precision(x, y, k, normalize=True):
   x = x[:k]
@@ -144,7 +146,8 @@ class RecommenderEvaluator(object):
     self.recommender = recommender
     self.metrics = metrics
 
-  def evaluate(self, eval_dataset, batch_size=1, num_users=None):
+  def evaluate(self, eval_dataset, batch_size=1,
+               num_users=None, num_workers=0):
     """
     Evaluates the recommender with an evaluation dataset.
 
@@ -154,6 +157,9 @@ class RecommenderEvaluator(object):
       batch_size (int): the size of the users batch passed to the recommender
       num_users (int, optional): the number of users from the dataset to evaluate on. If None,
         evaluate on all users
+      num_workers (int, optional): the number of workers to use on evaluating
+        the recommended items. This is useful if the recommender runs on GPU, so the
+        evaluation can run in parallel.
 
     Returns:
       dict: A dict mapping each metric to the list of the metric values on each
@@ -166,6 +172,32 @@ class RecommenderEvaluator(object):
     for metric in self.metrics:
       results[metric] = []
 
+    if num_workers > 0:
+      input_queue = Queue()
+      results_queues = [Queue() for _ in range(num_workers)]
+
+      def evaluate(input_queue, results_queue, metrics):
+        results = {}
+        for metric in self.metrics:
+          results[metric.metric_name] = []
+
+        while True:
+          x, y = input_queue.get(block=True)
+
+          if x is None:
+            break
+
+          for metric in metrics:
+            results[metric.metric_name].append(metric.evaluate(x, y))
+
+        results_queue.put(results)
+
+      workers = [Process(target=evaluate, args=(input_queue, results_queues[p_idx], self.metrics))
+                 for p_idx in range(num_workers)]
+
+      for worker in workers:
+        worker.start()
+
     processed_num_users = 0
     for batch in dataloader:
       input, target = utils.unzip(batch)
@@ -175,11 +207,27 @@ class RecommenderEvaluator(object):
       relevant_songs = [interactions.items for interactions in target]
 
       for x, y in zip(recommendations, relevant_songs):
-        for metric in self.metrics:
-          results[metric].append(metric.evaluate(x, y))
+        if num_workers > 0:
+          input_queue.put((x, y))
+        else:
+          for metric in self.metrics:
+            results[metric].append(metric.evaluate(x, y))
 
       processed_num_users += len(target)
       if num_users is not None and processed_num_users >= num_users:
         break
+
+    for _ in range(num_workers):
+      input_queue.put((None, None))
+
+    if num_workers > 0:
+
+      for results_queue in results_queues:
+        queue_results = results_queue.get()
+        for metric in self.metrics:
+          results[metric].extend(queue_results[metric.metric_name])
+
+      for worker in workers:
+        worker.join()
 
     return results
