@@ -567,8 +567,8 @@ class Recoder(object):
     batch = input[0]
     input_dense = torch.sparse.FloatTensor(batch.indices, batch.values, batch.size) \
       .to(device=self.device).to_dense()
-    output = self.model(input_dense, input_users=batch.users.to(device=self.device)).cpu()
-    return output, input_dense.cpu() if return_input else output
+    output = self.model(input_dense, input_users=batch.users.to(device=self.device))
+    return output, input_dense if return_input else output
 
   def _evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1, num_users=None):
     if self.model is None:
@@ -594,26 +594,18 @@ class Recoder(object):
       list: list of recommended items for each user in users_hist.
     """
     output, input = self.predict(users_hist, return_input=True)
-    input = input.numpy()
-    output = output.data.numpy()
+    # Set input items output to -inf so that they don't get recommended
+    output[input > 0] = - float('inf')
 
-    output[input > 0] = - np.inf
-
-    top_ind = np.argpartition(-output, num_recommendations, axis=1)
-    top_ind = top_ind[:, :num_recommendations]
-    top_output = output[np.arange(output.shape[0])[:, None], top_ind]
-
-    top_sorted_reset_ind = np.argsort(-top_output, axis=1)
-
-    top_sorted_ind = top_ind[np.arange(top_ind.shape[0])[:, None], top_sorted_reset_ind]
+    top_output, top_ind = torch.topk(output, num_recommendations, dim=1, sorted=True)
 
     # Map the recommended model item ids back to original item ids
     inverse_item_id_map = self.__get_inverse_item_id_map()
     if inverse_item_id_map is not None:
       item_id_mapper = np.vectorize(lambda item_id: inverse_item_id_map[item_id])
-      recommendations = item_id_mapper(top_sorted_ind)
+      recommendations = item_id_mapper(top_ind.tolist())
     else:
-      recommendations = top_sorted_ind.tolist()
+      recommendations = top_ind.tolist()
 
     return recommendations
 
