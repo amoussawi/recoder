@@ -133,13 +133,23 @@ class AnnoyEmbeddingsIndex(EmbeddingsIndex):
   def get_nns_by_id(self, embedding_id, n):
     nearest_indices = self.index.get_nns_by_item(self.id_map[embedding_id], n, search_k=self.search_k,
                                                  include_distances=self.include_distances)
-    nearest_ids = [self.inverse_id_map[ind] for ind in nearest_indices]
+
+    if not self.include_distances:
+      nearest_ids = [self.inverse_id_map[ind] for ind in nearest_indices]
+    else:
+      nearest_ids = dict(zip([self.inverse_id_map[ind] for ind in nearest_indices[0]], nearest_indices[1]))
+
     return nearest_ids
 
   def get_nns_by_embedding(self, embedding, n):
     nearest_indices = self.index.get_nns_by_vector(embedding, n, search_k=self.search_k,
                                                    include_distances=self.include_distances)
-    nearest_ids = [self.inverse_id_map[ind] for ind in nearest_indices]
+
+    if not self.include_distances:
+      nearest_ids = [self.inverse_id_map[ind] for ind in nearest_indices]
+    else:
+      nearest_ids = dict(zip([self.inverse_id_map[ind] for ind in nearest_indices[0]], nearest_indices[1]))
+
     return nearest_ids
 
   def get_similarity(self, id1, id2):
