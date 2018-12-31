@@ -6,6 +6,7 @@ from recoder.data import RecommendationDataset
 from recoder.metrics import Recall, NDCG
 from recoder.model import Recoder
 from recoder.nn import DynamicAutoencoder, MatrixFactorization
+from recoder.utils import dataframe_to_csr_matrix
 
 import os
 
@@ -24,14 +25,16 @@ def test_model(sparse, exp_recall_20, exp_recall_50, exp_ndcg_100):
   # keep the items that exist in the training dataset
   val_df = val_df[val_df.sid.isin(train_df.sid.unique())]
 
-  train_dataset = RecommendationDataset()
-  val_dataset = RecommendationDataset(target_dataset=train_dataset)
+  train_matrix, item_id_map, user_id_map = dataframe_to_csr_matrix(train_df, user_col='uid',
+                                                                   item_col='sid', inter_col='watched')
 
-  train_dataset.fill_from_dataframe(dataframe=train_df, num_workers=4, user_col='uid',
-                                    item_col='sid', inter_col='watched')
+  val_matrix, _, _ = dataframe_to_csr_matrix(val_df, user_col='uid',
+                                             item_col='sid', inter_col='watched',
+                                             item_id_map=item_id_map, user_id_map=user_id_map)
 
-  val_dataset.fill_from_dataframe(dataframe=val_df, user_col='uid',
-                                  item_col='sid', inter_col='watched')
+  train_dataset = RecommendationDataset(train_matrix)
+  val_dataset = RecommendationDataset(val_matrix, train_matrix)
+
 
   use_cuda = False
   model = DynamicAutoencoder(hidden_layers=[200], activation_type='tanh',
@@ -41,7 +44,7 @@ def test_model(sparse, exp_recall_20, exp_recall_50, exp_ndcg_100):
 
   trainer.train(train_dataset=train_dataset, val_dataset=val_dataset,
                 batch_size=500, lr=1e-3, weight_decay=2e-5,
-                num_epochs=30, num_neg_samples=0)
+                num_epochs=30, negative_sampling=True)
 
   # assert model metrics
   recall_20 = Recall(k=20, normalize=True)
