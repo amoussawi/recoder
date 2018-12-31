@@ -1,8 +1,7 @@
 import numpy as np
 
-from torch.utils.data import DataLoader
-
 import recoder.utils as utils
+from recoder.data import RecommendationDataLoader
 
 from multiprocessing import Process, Queue
 
@@ -165,8 +164,8 @@ class RecommenderEvaluator(object):
       dict: A dict mapping each metric to the list of the metric values on each
       user in the dataset.
     """
-    dataloader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=True,
-                            collate_fn=lambda _: _)
+    dataloader = RecommendationDataLoader(eval_dataset, batch_size=batch_size,
+                                          collate_fn=lambda _: _)
 
     results = {}
     for metric in self.metrics:
@@ -200,20 +199,20 @@ class RecommenderEvaluator(object):
 
     processed_num_users = 0
     for batch in dataloader:
-      input, target = utils.unzip(batch)
+      input, target = batch
 
       recommendations = self.recommender.recommend(input)
 
-      relevant_songs = [interactions.items for interactions in target]
+      relevant_items = [target.interactions_matrix[i].nonzero()[1] for i in range(len(target.users))]
 
-      for x, y in zip(recommendations, relevant_songs):
+      for x, y in zip(recommendations, relevant_items):
         if num_workers > 0:
           input_queue.put((x, y))
         else:
           for metric in self.metrics:
             results[metric].append(metric.evaluate(x, y))
 
-      processed_num_users += len(target)
+      processed_num_users += len(target.users)
       if num_users is not None and processed_num_users >= num_users:
         break
 
