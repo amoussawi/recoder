@@ -9,23 +9,68 @@ for implicit feedback collaborative filtering.
 
 ### Training
 
-#### Autoencoder Model
-```python
-import pandas as pd
+#### Prepare Data For Training
 
-from recoder.model import Recoder
-from recoder.data import RecommendationDataset
-from recoder.nn import DynamicAutoencoder
+The data for training/evaluation has to be in a `scipy.sparse.csr_matrix` format.
+Typically, the data can loaded as a `pandas.DataFrame`, that can be converted into
+a sparse matrix with `recoder.utils.dataframe_to_csr_matrix`.
+
+
+```python
+import pickle
+
+import pandas as pd
+from scipy.sparse import save_npz
+
+from recoder.utils import dataframe_to_csr_matrix
 
 
 # train_df is a dataframe where each row is a user-item interaction
 # and the value of that interaction
 train_df = pd.read_csv('train.csv')
 
-train_dataset = RecommendationDataset()
-train_dataset.fill_from_dataframe(dataframe=train_df, user_col='user',
-                                  item_col='item', inter_col='inter',
-                                  num_workers=4)
+train_matrix, item_id_map, user_id_map = dataframe_to_csr_matrix(train_df,
+                                                                 user_col='user',
+                                                                 item_col='item',
+                                                                 inter_col='score')
+
+# train_matrix is a user by item interactions matrix
+
+# item_id_map maps the original item ids into indexed item ids, such that
+# the interactions with item 'whatever' can be retrieved with
+# train_matrix[:, item_id_map['whatever']]
+
+# user_id_map is like item_id_map but for users. The interactions of user 'whoever'
+# can be retrieved with train_matrix[user_id_map['whoever'], :]
+
+
+# you can save the sparse matrix so you don't have to
+# get the sparse matrix everytime
+save_npz('train.npz', matrix=train_matrix)
+
+# also better saving the item_id_map and user_id_map
+# you can do that with pickle
+with open('item_id_map.dict', 'wb') as _item_id_map_file_pointer:
+  pickle.dump(item_id_map, _item_id_map_file_pointer)
+
+with open('user_id_map.dict', 'wb') as _user_id_map_file_pointer:
+  pickle.dump(user_id_map, _user_id_map_file_pointer)
+```
+
+
+#### Autoencoder Model
+
+```python
+from recoder.model import Recoder
+from recoder.data import RecommendationDataset
+from recoder.nn import DynamicAutoencoder
+
+import scipy.sparse as sparse
+
+# Load the training sparse matrix
+train_matrix = sparse.load_npz('train.npz')
+
+train_dataset = RecommendationDataset(train_matrix)
 
 # Define your model
 model = DynamicAutoencoder(hidden_layers=[200], activation_type='tanh',
@@ -37,28 +82,25 @@ recoder = Recoder(model=model, use_cuda=True,
 
 recoder.train(train_dataset=train_dataset, batch_size=500,
               lr=1e-3, weight_decay=2e-5, num_epochs=100,
-              num_data_workers=4, num_neg_samples=0)
+              num_data_workers=4, negative_sampling=True)
 ```
 
 #### Matrix Factorization Model
+
 Same as training Autoencoder model, just replace the Autoencoder with a Matrix Factorization
 Model.
 
 ```python
-import pandas as pd
-
 from recoder.model import Recoder
 from recoder.data import RecommendationDataset
 from recoder.nn import MatrixFactorization
 
-# train_df is a dataframe where each row is a user-item interaction
-# and the value of that interaction
-train_df = pd.read_csv('train.csv')
+import scipy.sparse as sparse
 
-train_dataset = RecommendationDataset()
-train_dataset.fill_from_dataframe(dataframe=train_df, user_col='user',
-                                  item_col='item', inter_col='inter',
-                                  num_workers=4)
+# Load the training sparse matrix
+train_matrix = sparse.load_npz('train.npz')
+
+train_dataset = RecommendationDataset(train_matrix)
 
 # Define your model
 model = MatrixFactorization(embedding_size=200, activation_type='tanh',
@@ -70,21 +112,23 @@ recoder = Recoder(model=model, use_cuda=True,
 
 recoder.train(train_dataset=train_dataset, batch_size=500,
               lr=1e-3, weight_decay=2e-5, num_epochs=100,
-              num_data_workers=4, num_neg_samples=0)
+              num_data_workers=4, negative_sampling=True)
 ```
 
 
 #### Your Own Factorization Model
+
 If you want to build your own Factorization model with the objective
 of reconstructing the interactions matrix, all you have to do is implement
 ``recoder.nn.FactorizationModel`` interface.
 
 ```python
-import pandas as pd
-
 from recoder.model import Recoder
 from recoder.data import RecommendationDataset
 from recoder.nn import FactorizationModel
+
+import scipy.sparse as sparse
+
 
 # Implement your model
 class YourModel(FactorizationModel):
@@ -113,14 +157,10 @@ class YourModel(FactorizationModel):
     pass
 
 
-# train_df is a dataframe where each row is a user-item interaction
-# and the value of that interaction
-train_df = pd.read_csv('train.csv')
+# Load the training sparse matrix
+train_matrix = sparse.load_npz('train.npz')
 
-train_dataset = RecommendationDataset()
-train_dataset.fill_from_dataframe(dataframe=train_df, user_col='user',
-                                  item_col='item', inter_col='inter',
-                                  num_workers=4)
+train_dataset = RecommendationDataset(train_matrix)
 
 # Define your model
 model = YourModel()
@@ -131,7 +171,7 @@ recoder = Recoder(model=model, use_cuda=True,
 
 recoder.train(train_dataset=train_dataset, batch_size=500,
               lr=1e-3, weight_decay=2e-5, num_epochs=100,
-              num_data_workers=4, num_neg_samples=0)
+              num_data_workers=4, negative_sampling=True)
 ```
 
 #### Save your model
@@ -145,7 +185,7 @@ model_checkpoint_prefix = 'models/model_'
 
 recoder.train(train_dataset=train_dataset, batch_size=500,
               lr=1e-3, weight_decay=2e-5, num_epochs=100,
-              num_data_workers=4, num_neg_samples=0,
+              num_data_workers=4, negative_sampling=True,
               model_checkpoint_prefix=model_checkpoint_prefix,
               checkpoint_freq=10)
 
@@ -154,22 +194,18 @@ recoder.save_state(model_checkpoint_prefix)
 ```
 
 #### Continue training
-```python
-import pandas as pd
 
+```python
 from recoder.model import Recoder
 from recoder.data import RecommendationDataset
 from recoder.nn import DynamicAutoencoder
 
+import scipy.sparse as sparse
 
-# train_df is a dataframe where each row is a user-item interaction
-# and the value of that interaction
-train_df = pd.read_csv('train.csv')
+# Load the training sparse matrix
+train_matrix = sparse.load_npz('train.npz')
 
-train_dataset = RecommendationDataset()
-train_dataset.fill_from_dataframe(dataframe=train_df, user_col='user',
-                                  item_col='item', inter_col='inter',
-                                  num_workers=4)
+train_dataset = RecommendationDataset(train_matrix)
 
 # your saved model
 model_file = 'models/your_model'
@@ -186,7 +222,7 @@ recoder.init_from_model_file(model_file)
 
 recoder.train(train_dataset=train_dataset, batch_size=500,
               lr=1e-3, weight_decay=2e-5, num_epochs=100,
-              num_data_workers=4, num_neg_samples=0)
+              num_data_workers=4, negative_sampling=True)
 ```
 
 #### Tips
@@ -199,13 +235,8 @@ in ``Autoencoder`` and ``MatrixFactorization`` to ``True`` in order to return sp
 and this can lead to 1.5-2x training speed-up. If you want to build your own model and have
 the embedding layers return sparse gradients, ``Recoder`` should be able to detect that.
 
-### Negative sampling
 
-There are two methods to do negative sampling:
-- Mini-batch based negative sampling
-- Random negative sampling
-
-#### Mini-batch based negative sampling
+### Mini-batch based negative sampling
 
 Mini-batch based negative sampling is based on the simple idea of sampling, for each
 user, only the negative items that the other users in the mini-batch have interacted
@@ -214,13 +245,13 @@ sampling probability of each negative item, one has to tune the training batch-s
 Mini-batch based negative sampling can speed-up training by 2-4x while having a small
 drop in recommendation performance.
 
-- To use mini-batch based negative sampling, you have to set ``num_neg_samples`` to ``0`` in
+- To use mini-batch based negative sampling, you have to set ``negative_sampling`` to ``True`` in
 ``Recoder.train`` and tune it with the ``batch_size``:
 
 ```python
 recoder.train(train_dataset=train_dataset, batch_size=500,
               lr=1e-3, weight_decay=2e-5, num_epochs=100,
-              num_data_workers=4, num_neg_samples=0)
+              num_data_workers=4, negative_sampling=True)
 ```
 
 - For large datasets with large number of items, we need a large
@@ -234,19 +265,12 @@ of negative samples.
 
 ```python
 recoder.train(train_dataset=train_dataset, batch_size=500,
-              num_sampling_users=2000, lr=1e-3, weight_decay=2e-5,
-              num_epochs=100, num_data_workers=4, num_neg_samples=0)
+              negative_sampling=True, num_sampling_users=2000, lr=1e-3,
+              weight_decay=2e-5, num_epochs=100, num_data_workers=4)
 ```
 
-#### Random negative sampling
-To do random negative sampling, set ``num_neg_samples`` to the number
-of random negative samples to generate per batch. Note for batch sizes
-greater than 1, the random negative sampling is not actually random,
-because the examples within the batch will share those random negative
-samples.
-
-
 ### Evaluation
+
 You can evaluate your model with different metrics. Currently, there
 are 3 metrics implemented: Recall, NDCG, and Average Precision. You can
 also implement your own ``recoder.metrics.Metric``.
@@ -254,40 +278,28 @@ also implement your own ``recoder.metrics.Metric``.
 #### Evaluating your model while training
 
 ```python
-import pandas as pd
-
 from recoder.model import Recoder
 from recoder.data import RecommendationDataset
 from recoder.nn import DynamicAutoencoder
 from recoder.metrics import AveragePrecision, Recall, NDCG
 
+import scipy.sparse as sparse
 
-# train_df is a dataframe where each row is a user-item interaction
-# and the value of that interaction
-train_df = pd.read_csv('train.csv')
+
+# Load the training sparse matrix
+train_matrix = sparse.load_npz('train.npz')
 
 # validation set. Split your val set into two splits.
 # One split will be used as input to the model to
 # generate predictions, and the other is which the
 # model predictions will be evaluated on
-val_input_df = pd.read_csv('test_input.csv')
-val_target_df = pd.read_csv('test_output.csv')
+val_input_matrix = sparse.load_npz('test_input.npz')
+val_target_matrix = sparse.load_npz('test_target.npz')
 
-train_dataset = RecommendationDataset()
-train_dataset.fill_from_dataframe(dataframe=train_df, user_col='user',
-                                  item_col='item', inter_col='inter',
-                                  num_workers=4)
+train_dataset = RecommendationDataset(train_matrix)
 
-val_target_dataset = RecommendationDataset()
-val_dataset = RecommendationDataset(target_dataset=val_target_dataset)
+val_dataset = RecommendationDataset(val_input_matrix, val_target_matrix)
 
-val_target_dataset.fill_from_dataframe(dataframe=val_target_df, user_col='user',
-                                       item_col='item', inter_col='inter',
-                                       num_workers=4)
-
-val_dataset.fill_from_dataframe(dataframe=val_input_df, user_col='user',
-                                item_col='item', inter_col='inter',
-                                num_workers=4)
 
 # Define your model
 model = DynamicAutoencoder(hidden_layers=[200], activation_type='tanh',
@@ -302,40 +314,32 @@ recoder = Recoder(model=model, use_cuda=True,
                   optimizer_type='adam', loss='logistic')
 
 recoder.train(train_dataset=train_dataset,
-              val_dataset=val_tr_dataset, batch_size=500,
+              val_dataset=val_dataset, batch_size=500,
               lr=1e-3, weight_decay=2e-5, num_epochs=100,
-              num_data_workers=4, num_neg_samples=0,
+              num_data_workers=4, negative_sampling=True,
               metrics=metrics, eval_num_recommendations=100,
               eval_freq=5)
 ```
 
 #### Evaluating your model after training
-```python
-import pandas as pd
 
+```python
 from recoder.model import Recoder
 from recoder.data import RecommendationDataset
 from recoder.nn import DynamicAutoencoder
 from recoder.metrics import AveragePrecision, Recall, NDCG
 
+import scipy.sparse as sparse
 
-# test set. Split your test set into two splits.
+
+# validation set. Split your val set into two splits.
 # One split will be used as input to the model to
 # generate predictions, and the other is which the
 # model predictions will be evaluated on
-test_input_df = pd.read_csv('test_input.csv')
-test_target_df = pd.read_csv('test_output.csv')
+test_input_matrix = sparse.load_npz('test_input.npz')
+test_target_matrix = sparse.load_npz('test_target.npz')
 
-test_target_dataset = RecommendationDataset()
-test_dataset = RecommendationDataset(target_dataset=test_target_dataset)
-
-test_target_dataset.fill_from_dataframe(dataframe=test_target_df, user_col='user',
-                                        item_col='item', inter_col='inter',
-                                        num_workers=4)
-
-test_dataset.fill_from_dataframe(dataframe=test_input_df, user_col='user',
-                                 item_col='item', inter_col='inter',
-                                 num_workers=4)
+test_dataset = RecommendationDataset(test_input_matrix, test_target_matrix)
 
 # your saved model
 model_file = 'models/your_model'
