@@ -264,7 +264,8 @@ class Recoder(object):
             iters_per_epoch=None, batch_size=64, lr_milestones=None,
             negative_sampling=False, num_sampling_users=0, num_data_workers=0,
             model_checkpoint_prefix=None, checkpoint_freq=0,
-            eval_freq=0, eval_num_recommendations=None, eval_num_users=None, metrics=None):
+            eval_freq=0, eval_num_recommendations=None,
+            eval_num_users=None, metrics=None, eval_batch_size=None):
     """
     Trains the model
 
@@ -291,6 +292,7 @@ class Recoder(object):
       eval_num_users (int, optional): number of users from the validation dataset to use for evaluation.
         If None, all users in the validation dataset are used for evaluation.
       metrics (list[Metric], optional): list of ``Metric`` used to evaluate the model
+      eval_batch_size (int, optional): the size of the evaluation batch
     """
     log.info('{} Mode'.format('CPU' if self.device.type == 'cpu' else 'GPU'))
     model_params = self.model.model_params()
@@ -307,6 +309,9 @@ class Recoder(object):
 
     if num_sampling_users == 0:
       num_sampling_users = batch_size
+
+    if eval_batch_size is None:
+      eval_batch_size = batch_size
 
     assert num_sampling_users >= batch_size and num_sampling_users % batch_size == 0, \
       "number of sampling users should be a multiple of the batch size"
@@ -344,13 +349,14 @@ class Recoder(object):
                 metrics=metrics,
                 eval_num_recommendations=eval_num_recommendations,
                 iters_per_epoch=iters_per_epoch,
-                eval_num_users=eval_num_users)
+                eval_num_users=eval_num_users,
+                eval_batch_size=eval_batch_size)
 
   def _train(self, train_dataloader, val_dataloader,
              num_epochs, current_epoch, lr_scheduler,
              batch_size, model_checkpoint_prefix, checkpoint_freq,
              eval_freq, metrics, eval_num_recommendations, iters_per_epoch,
-             eval_num_users):
+             eval_num_users, eval_batch_size):
     num_batches = len(train_dataloader)
 
     iters_processed = 0
@@ -424,7 +430,7 @@ class Recoder(object):
         if metrics is not None and eval_num_recommendations is not None:
           results = self._evaluate(val_dataloader.dataset,
                                    num_recommendations=eval_num_recommendations,
-                                   metrics=metrics, batch_size=batch_size,
+                                   metrics=metrics, batch_size=eval_batch_size,
                                    num_users=eval_num_users)
           for metric in results:
             postfix[str(metric)] = np.mean(results[metric])
