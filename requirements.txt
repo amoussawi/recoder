@@ -1,5 +1,6 @@
 torch
 numpy
+scipy
 annoy
 glog
 tqdm
