@@ -1,9 +1,9 @@
 Data
 ****
 
-UserInteractions
-----------------
-.. autoclass:: recoder.data.UserInteractions
+UsersInteractions
+-----------------
+.. autoclass:: recoder.data.UsersInteractions
     :members:
 
 RecommendationDataset
