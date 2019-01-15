@@ -38,13 +38,6 @@ class Recoder(object):
     loss_params (dict, optional): loss function extra params based on loss module if ``loss`` is a ``str``.
       Ignored if ``loss`` is a ``torch.nn.Module``.
     use_cuda (bool, optional): use GPU when training/evaluating the model.
-    index_ids (bool, optional): If ``True``, the item and user ids will be indexed. Used when those ids
-      are strings, or integers but don't start with 0 and can have values much larger than the total
-      number of items/users in the dataset. The ids index is provided by accessing ``Recoder.item_id_map``,
-      and ``Recoder.user_id_map`` which maps from original id to the model id.
-      If ``False``, the ids in the dataset should be integers, and the number of items/users will be
-      equal to `max(item_ids) + 1` assuming item ids start with 0. Note: indexing the item ids can
-      slightly slow the training process.
     user_based (bool, optional): If your model is based on users or not. If True, an exception will
       will be raised when there are inconsistencies between the users represented in the model
       and the users in the training datasets.
@@ -57,8 +50,7 @@ class Recoder(object):
                num_items=None, num_users=None,
                optimizer_type='sgd', loss='mse',
                loss_params=None, use_cuda=False,
-               index_ids=True, user_based=True,
-               item_based=True):
+               user_based=True, item_based=True):
 
     self.model = model
     self.num_items = num_items
@@ -67,7 +59,6 @@ class Recoder(object):
     self.loss = loss
     self.loss_params = loss_params if loss_params else {}
     self.use_cuda = use_cuda
-    self.index_ids = index_ids
     self.user_based = user_based
     self.item_based = item_based
 
@@ -76,8 +67,6 @@ class Recoder(object):
     else:
       self.device = torch.device('cpu')
 
-    self.item_id_map = None
-    self.user_id_map = None
     self.optimizer = None
     self.sparse_optimizer = None
     self.current_epoch = 1
@@ -86,8 +75,6 @@ class Recoder(object):
     self.__model_initialized = False
     self.__optimizer_state_dict = None
     self.__sparse_optimizer_state_dict = None
-
-    self.__inverse_item_id_map = None
 
   def __init_model(self):
     if self.__model_initialized:
@@ -188,23 +175,16 @@ class Recoder(object):
       raise Exception('No state file found in {}'.format(model_file))
     model_saved_state = torch.load(model_file, map_location='cpu')
     model_params = model_saved_state['model_params']
-    self.item_id_map = model_saved_state['item_id_map']
     self.current_epoch = model_saved_state['last_epoch']
-    self.loss = model_saved_state.get('loss', None)
-    self.loss_params = model_saved_state.get('loss_params', None)
+    self.loss = model_saved_state.get('loss', self.loss)
+    self.loss_params = model_saved_state.get('loss_params', self.loss_params)
     self.optimizer_type = model_saved_state['optimizer_type']
-    self.items = model_saved_state.get('items', None) or self.num_items
+    self.items = model_saved_state.get('items', None)
     self.users = model_saved_state.get('users', None)
     self.num_items = model_saved_state.get('num_items', None)
     self.num_users = model_saved_state.get('num_users', None)
     self.__optimizer_state_dict = model_saved_state['optimizer']
     self.__sparse_optimizer_state_dict = model_saved_state.get('sparse_optimizer', None)
-
-    # old versions backward compatibility
-    if 'hidden_layers' in model_saved_state:
-      model_params['hidden_layers'] = model_saved_state['hidden_layers']
-    if 'vector_dim' in model_saved_state:
-      self.num_items = model_saved_state['vector_dim']
 
     self.model.load_model_params(model_params)
     self.__init_model()
@@ -226,8 +206,6 @@ class Recoder(object):
     current_state = {
       'recoder_version': __version__,
       'model_params': self.model.model_params(),
-      'item_id_map': self.item_id_map,
-      'user_id_map': self.user_id_map,
       'last_epoch': self.current_epoch,
       'model': self.model.state_dict(),
       'optimizer_type': self.optimizer_type,
@@ -238,8 +216,8 @@ class Recoder(object):
       'num_users': self.num_users
     }
 
-    if self.loss is str:
-      current_state['loss'] = self.loss,
+    if type(self.loss) is str:
+      current_state['loss'] = self.loss
       current_state['loss_params'] = self.loss_params
 
     torch.save(current_state, checkpoint_file)
@@ -250,58 +228,26 @@ class Recoder(object):
     if self.items is None:
       self.items = train_dataset.items
     else:
-      self.items = list(set(self.items + train_dataset.items))
+      self.items = np.unique(np.append(self.items, train_dataset.items))
 
     if self.users is None:
       self.users = train_dataset.users
     else:
-      self.users = list(set(self.users + train_dataset.users))
+      self.users = np.unique(np.append(self.users, train_dataset.users))
 
-    if self.index_ids:
-      if self.num_users is None:
-        self.num_users = len(self.users)
-      elif self.user_based:
-        assert self.num_users >= len(self.users), \
-          'Number of users in the model should be greater or equal than the number of users in the dataset.' \
-          'If your model is independent of users, set user_dependent to False in Recoder constructor.'
+    if self.item_based and self.num_items is None:
+      self.num_items = int(np.max(self.items)) + 1
+    elif self.item_based:
+      assert self.num_items >= int(np.max(self.items)) + 1,\
+        'The largest item id should be smaller than number of items.' \
+        'If your model is not based on items, set item_based to False in Recoder constructor.'
 
-      if self.user_id_map is None:
-        self.user_id_map = dict([(user_id, idx) for idx, user_id in enumerate(self.users)])
-      elif self.user_based:
-        assert len(np.setdiff1d(self.users, list(self.user_id_map.keys()))) == 0, \
-          "There are users in the dataset that doesn't exist in the items index." \
-          "If your model is not based on users, set user_based to False in Recoder constructor."
-
-      if self.num_items is None:
-        self.num_items = len(self.items)
-      elif self.item_based:
-        assert self.num_items >= len(self.items), \
-          'Number of items in the model should be greater or equal than the number of items in the dataset.' \
-          'If your model is not based on items, set item_based to False in Recoder constructor.'
-
-      if self.item_id_map is None:
-        self.item_id_map = dict([(item_id, idx) for idx, item_id in enumerate(self.items)])
-      elif self.item_based:
-        assert len(np.setdiff1d(self.items, list(self.item_id_map.keys()))) == 0, \
-          "There are items in the dataset that doesn't exist in the items index." \
-          "If your model is not based on items, set item_based to False in Recoder constructor."
-    else:
-      assert type(self.items[0]) is int, 'item ids should be integers, or set index_ids to True'
-      assert type(self.users[0]) is int, 'user ids should be integers, or set index_ids to True'
-
-      if self.num_items is None:
-        self.num_items = int(np.max(self.items)) + 1
-      elif self.item_based:
-        assert self.num_items >= int(np.max(self.items)) + 1,\
-          'The largest item id should be smaller than number of items.' \
-          'If your model is not based on items, set item_based to False in Recoder constructor.'
-
-      if self.num_users is None:
-        self.num_users = int(np.max(self.users)) + 1
-      elif self.user_based:
-        assert self.num_users >= int(np.max(self.users)) + 1,\
-          'The largest user id should be smaller than number of users.' \
-          'If your model is not based on users, set user_based to False in Recoder constructor.'
+    if self.user_based and self.num_users is None:
+      self.num_users = int(np.max(self.users)) + 1
+    elif self.user_based:
+      assert self.num_users >= int(np.max(self.users)) + 1,\
+        'The largest user id should be smaller than number of users.' \
+        'If your model is not based on users, set user_based to False in Recoder constructor.'
 
     self.__init_model()
     self.__init_optimizer(lr=lr, weight_decay=weight_decay)
@@ -309,10 +255,11 @@ class Recoder(object):
 
   def train(self, train_dataset, val_dataset=None,
             lr=0.001, weight_decay=0, num_epochs=1,
-            batch_size=64, lr_milestones=None,
-            num_neg_samples=0, num_sampling_users=0, num_data_workers=0,
+            iters_per_epoch=None, batch_size=64, lr_milestones=None,
+            negative_sampling=False, num_sampling_users=0, num_data_workers=0,
             model_checkpoint_prefix=None, checkpoint_freq=0,
-            eval_freq=0, eval_num_recommendations=None, metrics=None):
+            eval_freq=0, eval_num_recommendations=None,
+            eval_num_users=None, metrics=None, eval_batch_size=None):
     """
     Trains the model
 
@@ -322,13 +269,11 @@ class Recoder(object):
       lr (float, optional): learning rate.
       weight_decay (float, optional): weight decay (L2 normalization).
       num_epochs (int, optional): number of epochs to train the model.
+      iters_per_epoch (int, optional): number of training iterations per training epoch. If None,
+        one epoch is full number of training samples in the dataset
       batch_size (int, optional): batch size
       lr_milestones (list, optional): optimizer learning rate epochs milestones (0.1 decay).
-      num_neg_samples (int, optional): number of negative samples to generate for each user.
-        If `-1`, then all possible negative items will be sampled. If `0`, the negative items
-        are sampled with mini-batch based negative sampling. If `> 0`, the negative items
-        are sampled with mini-batch based negative sampling in addition to common random negative
-        items if needed.
+      negative_sampling (bool, optional): whether to apply mini-batch based negative sampling or not.
       num_sampling_users (int, optional): number of users to consider for sampling items.
         This is useful for increasing the number of negative samples in mini-batch based negative
         sampling while keeping the batch-size small. If 0, then num_sampling_users will
@@ -338,7 +283,10 @@ class Recoder(object):
       model_checkpoint_prefix (str, optional): model checkpoint save path prefix
       eval_freq (int, optional): epochs frequency of doing an evaluation
       eval_num_recommendations (int, optional): num of recommendations to generate on evaluation
+      eval_num_users (int, optional): number of users from the validation dataset to use for evaluation.
+        If None, all users in the validation dataset are used for evaluation.
       metrics (list[Metric], optional): list of ``Metric`` used to evaluate the model
+      eval_batch_size (int, optional): the size of the evaluation batch
     """
     log.info('{} Mode'.format('CPU' if self.device.type == 'cpu' else 'GPU'))
     model_params = self.model.model_params()
@@ -356,24 +304,21 @@ class Recoder(object):
     if num_sampling_users == 0:
       num_sampling_users = batch_size
 
+    if eval_batch_size is None:
+      eval_batch_size = batch_size
+
     assert num_sampling_users >= batch_size and num_sampling_users % batch_size == 0, \
       "number of sampling users should be a multiple of the batch size"
 
     self.__init_training(train_dataset=train_dataset, lr=lr, weight_decay=weight_decay)
 
     train_dataloader = RecommendationDataLoader(train_dataset, batch_size=batch_size,
-                                                vector_dim=self.num_items,
-                                                num_neg_samples=num_neg_samples,
-                                                item_id_map=self.item_id_map,
-                                                user_id_map=self.user_id_map,
+                                                negative_sampling=negative_sampling,
                                                 num_sampling_users=num_sampling_users,
                                                 num_workers=num_data_workers)
     if val_dataset is not None:
       val_dataloader = RecommendationDataLoader(val_dataset, batch_size=batch_size,
-                                                vector_dim=self.num_items,
-                                                num_neg_samples=num_neg_samples,
-                                                item_id_map=self.item_id_map,
-                                                user_id_map=self.user_id_map,
+                                                negative_sampling=negative_sampling,
                                                 num_sampling_users=num_sampling_users,
                                                 num_workers=num_data_workers)
     else:
@@ -396,13 +341,22 @@ class Recoder(object):
                 checkpoint_freq=checkpoint_freq,
                 eval_freq=eval_freq,
                 metrics=metrics,
-                eval_num_recommendations=eval_num_recommendations)
+                eval_num_recommendations=eval_num_recommendations,
+                iters_per_epoch=iters_per_epoch,
+                eval_num_users=eval_num_users,
+                eval_batch_size=eval_batch_size)
 
   def _train(self, train_dataloader, val_dataloader,
              num_epochs, current_epoch, lr_scheduler,
              batch_size, model_checkpoint_prefix, checkpoint_freq,
-             eval_freq, metrics, eval_num_recommendations):
+             eval_freq, metrics, eval_num_recommendations, iters_per_epoch,
+             eval_num_users, eval_batch_size):
     num_batches = len(train_dataloader)
+
+    iters_processed = 0
+    if iters_per_epoch is None:
+      iters_per_epoch = num_batches
+
     for epoch in range(current_epoch, num_epochs + 1):
       self.current_epoch = epoch
       self.model.train()
@@ -413,8 +367,20 @@ class Recoder(object):
       else:
         lr = self.optimizer.defaults['lr']
       description = 'Epoch {}/{} (lr={})'.format(epoch, num_epochs, lr)
-      progress_bar = tqdm(range(num_batches), desc=description)
-      for batch_itr, (input, target) in enumerate(train_dataloader, 1):
+
+      if iters_processed == 0 or iters_processed == num_batches:
+        # If we are starting from scratch,
+        # or we iterated through the whole dataloader,
+        # reset and reinitialize the iterator
+        iters_processed = 0
+        iterator = enumerate(train_dataloader, 1)
+
+      iters_to_process = min(iters_per_epoch, num_batches - iters_processed)
+      iters_processed += iters_to_process
+
+      progress_bar = tqdm(range(iters_to_process), desc=description)
+
+      for batch_itr, (input, target) in iterator:
         if self.optimizer is not None:
           self.optimizer.zero_grad()
 
@@ -441,12 +407,15 @@ class Recoder(object):
         if target_items is not None:
           num_items = target_items.size(0)
         else:
-          num_items = train_dataloader.vector_dim
+          num_items = len(self.items)
 
         progress_bar.set_postfix(loss=np.mean(aggregated_losses[-1]),
                                  num_items=num_items,
                                  refresh=False)
         progress_bar.update()
+
+        if batch_itr % iters_per_epoch == 0:
+          break
 
       postfix = {'loss': loss.item()}
       if eval_freq > 0 and epoch % eval_freq == 0 and val_dataloader is not None:
@@ -455,16 +424,17 @@ class Recoder(object):
         if metrics is not None and eval_num_recommendations is not None:
           results = self._evaluate(val_dataloader.dataset,
                                    num_recommendations=eval_num_recommendations,
-                                   metrics=metrics, batch_size=batch_size)
+                                   metrics=metrics, batch_size=eval_batch_size,
+                                   num_users=eval_num_users)
           for metric in results:
             postfix[str(metric)] = np.mean(results[metric])
+
+      progress_bar.set_postfix(postfix)
+      progress_bar.close()
 
       if model_checkpoint_prefix and \
           ((checkpoint_freq > 0 and epoch % checkpoint_freq == 0) or epoch == num_epochs):
         self.save_state(model_checkpoint_prefix)
-
-      progress_bar.set_postfix(postfix)
-      progress_bar.close()
 
   def _validate(self, val_dataloader):
     self.model.eval()
@@ -514,12 +484,12 @@ class Recoder(object):
     loss = self.loss_module(output, target_dense) / normalization
     return loss
 
-  def predict(self, users_hist, return_input=False):
+  def predict(self, users_interactions, return_input=False):
     """
     Predicts the user interactions with all items
 
     Args:
-      users_hist (list): A batch of users' history consisting of list of ``Interaction``
+      users_interactions (UsersInteractions): A batch of users' history consisting of list of ``Interaction``
       return_input (bool, optional): whether to return the dense input batch
 
     Returns:
@@ -531,18 +501,16 @@ class Recoder(object):
 
     self.model.eval()
 
-    batch_collator = BatchCollator(batch_size=len(users_hist), vector_dim=self.num_items,
-                                   num_neg_samples=-1, item_id_map=self.item_id_map,
-                                   user_id_map=self.user_id_map)
+    batch_collator = BatchCollator(batch_size=len(users_interactions.users), negative_sampling=False)
 
-    input = batch_collator.collate(users_hist)
+    input = batch_collator.collate(users_interactions)
     batch = input[0]
     input_dense = torch.sparse.FloatTensor(batch.indices, batch.values, batch.size) \
       .to(device=self.device).to_dense()
-    output = self.model(input_dense, input_users=batch.users.to(device=self.device)).cpu()
-    return output, input_dense.cpu() if return_input else output
+    output = self.model(input_dense, input_users=batch.users.to(device=self.device))
+    return output, input_dense if return_input else output
 
-  def _evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
+  def _evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1, num_users=None):
     if self.model is None:
       raise Exception('Model not initialized')
 
@@ -551,45 +519,31 @@ class Recoder(object):
 
     evaluator = RecommenderEvaluator(recommender, metrics)
 
-    results = evaluator.evaluate(eval_dataset, batch_size=batch_size)
+    results = evaluator.evaluate(eval_dataset, batch_size=batch_size, num_users=num_users)
     return results
 
-  def recommend(self, users_hist, num_recommendations):
+  def recommend(self, users_interactions, num_recommendations):
     """
     Generate list of recommendations for each user in ``users_hist``.
 
     Args:
-      users_hist (list[UserInteractions]): list of users interactions.
-      num_recommendations: number of recommendations to generate.
+      users_interactions (UsersInteractions): list of users interactions.
+      num_recommendations (int): number of recommendations to generate.
 
     Returns:
-      list: list of recommended items for each user in users_hist.
+      list: list of recommended items for each user in users_interactions.
     """
-    output, input = self.predict(users_hist, return_input=True)
-    input = input.numpy()
-    output = output.data.numpy()
+    output, input = self.predict(users_interactions, return_input=True)
+    # Set input items output to -inf so that they don't get recommended
+    output[input > 0] = - float('inf')
 
-    output[input > 0] = - np.inf
+    top_output, top_ind = torch.topk(output, num_recommendations, dim=1, sorted=True)
 
-    top_ind = np.argpartition(-output, num_recommendations, axis=1)
-    top_ind = top_ind[:, :num_recommendations]
-    top_output = output[np.arange(output.shape[0])[:, None], top_ind]
-
-    top_sorted_reset_ind = np.argsort(-top_output, axis=1)
-
-    top_sorted_ind = top_ind[np.arange(top_ind.shape[0])[:, None], top_sorted_reset_ind]
-
-    # Map the recommended model item ids back to original item ids
-    inverse_item_id_map = self.__get_inverse_item_id_map()
-    if inverse_item_id_map is not None:
-      item_id_mapper = np.vectorize(lambda item_id: inverse_item_id_map[item_id])
-      recommendations = item_id_mapper(top_sorted_ind)
-    else:
-      recommendations = top_sorted_ind.tolist()
+    recommendations = top_ind.tolist()
 
     return recommendations
 
-  def evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1):
+  def evaluate(self, eval_dataset, num_recommendations, metrics, batch_size=1, num_users=None):
     """
     Evaluates the current model given an evaluation dataset.
 
@@ -600,16 +554,6 @@ class Recoder(object):
       batch_size (int, optional): batch size of computations.
     """
     results = self._evaluate(eval_dataset, num_recommendations, metrics,
-                             batch_size=batch_size)
+                             batch_size=batch_size, num_users=num_users)
     for metric in results:
       log.info('{}: {}'.format(metric, np.mean(results[metric])))
-
-  def __get_inverse_item_id_map(self):
-    if self.item_id_map is None:
-      return None
-
-    if self.__inverse_item_id_map is None:
-      self.__inverse_item_id_map = {model_item_id:item_id
-                                    for item_id, model_item_id in self.item_id_map.items()}
-
-    return self.__inverse_item_id_map
