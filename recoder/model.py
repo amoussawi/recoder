@@ -176,8 +176,8 @@ class Recoder(object):
     model_saved_state = torch.load(model_file, map_location='cpu')
     model_params = model_saved_state['model_params']
     self.current_epoch = model_saved_state['last_epoch']
-    self.loss = model_saved_state.get('loss', None)
-    self.loss_params = model_saved_state.get('loss_params', None)
+    self.loss = model_saved_state.get('loss', self.loss)
+    self.loss_params = model_saved_state.get('loss_params', self.loss_params)
     self.optimizer_type = model_saved_state['optimizer_type']
     self.items = model_saved_state.get('items', None)
     self.users = model_saved_state.get('users', None)
@@ -222,8 +222,8 @@ class Recoder(object):
       'num_users': self.num_users
     }
 
-    if self.loss is str:
-      current_state['loss'] = self.loss,
+    if type(self.loss) is str:
+      current_state['loss'] = self.loss
       current_state['loss_params'] = self.loss_params
 
     torch.save(current_state, checkpoint_file)
@@ -234,12 +234,12 @@ class Recoder(object):
     if self.items is None:
       self.items = train_dataset.items
     else:
-      self.items = list(set(self.items + train_dataset.items))
+      self.items = np.unique(np.append(self.items, train_dataset.items))
 
     if self.users is None:
       self.users = train_dataset.users
     else:
-      self.users = list(set(self.users + train_dataset.users))
+      self.users = np.unique(np.append(self.users, train_dataset.users))
 
     if self.item_based and self.num_items is None:
       self.num_items = int(np.max(self.items)) + 1
