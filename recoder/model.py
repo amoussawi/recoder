@@ -186,12 +186,6 @@ class Recoder(object):
     self.__optimizer_state_dict = model_saved_state['optimizer']
     self.__sparse_optimizer_state_dict = model_saved_state.get('sparse_optimizer', None)
 
-    # old versions backward compatibility
-    if 'hidden_layers' in model_saved_state:
-      model_params['hidden_layers'] = model_saved_state['hidden_layers']
-    if 'vector_dim' in model_saved_state:
-      self.num_items = model_saved_state['vector_dim']
-
     self.model.load_model_params(model_params)
     self.__init_model()
     self.model.load_state_dict(model_saved_state['model'])
