@@ -3,7 +3,7 @@ wheel
 twine
 pytest
 torch==1.8.1
-numpy==1.19.5
+numpy==1.22.0
 scipy==1.6.2
 annoy==1.17.0
 glog==0.3.1
